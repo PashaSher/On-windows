@@ -189,15 +189,23 @@ def run_listen(
             udp_sock.close()
 
 
-def run_connect(host: str, port: int, window: str) -> None:
+def run_connect(host: str, port: int, window: str, connect_timeout: float) -> None:
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-    log.info("TCP: подключение к %s:%s ...", host, port)
+    sock.settimeout(max(1.0, connect_timeout))
+    log.info("TCP: подключение к %s:%s (таймаут %.0f с) ...", host, port, connect_timeout)
     try:
         sock.connect((host, port))
     except OSError as e:
         log.error("TCP: не удалось подключиться: %s", e)
+        if host.startswith("10.42."):
+            log.error(
+                "Адрес 10.42.x — сеть точки Pi. Нужно подключить ПК к Wi‑Fi SSID малинки "
+                "(Ethernet к роутеру не подставляет эту подсеть). Проверьте: "
+                "netsh wlan show interfaces и ipconfig (шлюз Wi‑Fi должен быть IP Pi)."
+            )
         sys.exit(1)
+    sock.settimeout(None)
     log.info("TCP: соединение установлено")
     try:
         stream_to_window(sock, window)
@@ -251,6 +259,12 @@ def main() -> None:
     )
     p_conn.add_argument("--host", required=True, help="Pi IP or hostname")
     p_conn.add_argument("--port", type=int, default=5000)
+    p_conn.add_argument(
+        "--connect-timeout",
+        type=float,
+        default=15.0,
+        help="Seconds to wait for TCP connect (avoid infinite hang)",
+    )
     p_conn.add_argument("--window", default="Pi camera")
 
     args = parser.parse_args()
@@ -261,7 +275,7 @@ def main() -> None:
         disc = None if args.no_discovery or args.discover_port == 0 else args.discover_port
         run_listen(args.port, disc, args.discover_token, args.window)
     elif args.cmd == "connect":
-        run_connect(args.host, args.port, args.window)
+        run_connect(args.host, args.port, args.window, args.connect_timeout)
 
 
 if __name__ == "__main__":

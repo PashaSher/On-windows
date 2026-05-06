@@ -1,0 +1,41 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Connect: Pi hotspot (10.42.0.1)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/receive_stream.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": ["connect", "--host", "10.42.0.1", "--port", "5000"]
+    },
+    {
+      "name": "Connect: Pi home LAN (192.168.1.23)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/receive_stream.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": ["connect", "--host", "192.168.1.23", "--port", "5000"]
+    },
+    {
+      "name": "Listen (wait for Pi / fake_sender)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/receive_stream.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": ["listen", "--port", "5000"]
+    },
+    {
+      "name": "Fake Sender (local test)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/fake_sender.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": ["--host", "127.0.0.1", "--port", "5000"]
+    }
+  ]
+}
