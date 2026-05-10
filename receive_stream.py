@@ -22,7 +22,7 @@ tcp и control). Секрет: --discover-token (должен совпадать
 Видео конвейер — три независимых стадии (на трёх потоках):
   1) video-rx:  только TCP recv → raw_q (maxsize=1, drop-old).
   2) video-dec: raw_q → cv2.imdecode + resize → frame_q (maxsize=1, drop-old).
-  3) main:      frame_q → cv2.imshow + опрос ввода + UI.
+  3) main:      frame_q → cv2.imshow + опрос ввода + UI (Wi‑Fi, АКБ из Romeo adc_read/battery_v).
 Декод и сетевой recv разнесены, чтобы всплеск декодирования (или нагрузка
 от управления) не замедлял дренаж TCP — иначе у Pi заполняется буфер
 отправки и видео визуально подлагивает.
@@ -43,6 +43,7 @@ romeo-tx пишет/читает/повторяет, чтобы UI не блок
   На Pi: меньше разрешение и выше --jpeg-quality (например 85–92) дают меньше «мыла» при движении,
   но больше трафика; --fps и загрузка CPU тоже влияют.
   На ПК: --display-max-width 960 — уменьшить картинку перед imshow (быстрее UI);
+  --display-soften σ — лёгкое Gaussian после масштаба (меньше «лесенки»/блоков MJPEG, цена — мягче мелочь и CPU);
   --show-fps — показывать принятый FPS в заголовке окна.
 
 Управление гусеницами — режим hold (по умолчанию, key-down / key-up):
@@ -67,8 +68,10 @@ import argparse
 import json
 import logging
 import queue
+import re
 import socket
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -76,6 +79,10 @@ import time
 log = logging.getLogger("camrecv")
 
 _VIDEO_EOF = object()
+
+# Минимум между turret_stop на провод: при дребезге клавиш/фокуса Pi получает пачку
+# одинаковых команд, writer блокируется на ответах — «зависание» управления.
+_TURRET_STOP_MIN_INTERVAL_S = 0.22
 
 # OpenCV waitKeyEx: стрелки (типичные коды Windows)
 _ARROW_TURRET = {
@@ -392,6 +399,7 @@ def _romeo_keyboard_state(
                 romeo.send_json_cmd(cmd_sm)
                 log.debug("romeo cmd %s (queued, edge press)", cmd_sm)
                 state["last_turret_smooth"] = new_turret
+                state["_turret_stop_sent_mono"] = 0.0
         elif cur_turret is not None:
             if turret_grace_sec <= 0.0:
                 release_now = True
@@ -403,10 +411,13 @@ def _romeo_keyboard_state(
                 else:
                     release_now = now - float(g0) >= turret_grace_sec
             if release_now:
-                romeo.send_json_cmd({"action": "turret_stop"})
-                log.info("romeo cmd turret_stop (queued, edge release)")
-                state["last_turret_smooth"] = None
-                state["turret_release_from"] = None
+                last_stop = float(state.get("_turret_stop_sent_mono", 0.0))
+                if now - last_stop >= _TURRET_STOP_MIN_INTERVAL_S:
+                    romeo.send_json_cmd({"action": "turret_stop"})
+                    log.debug("romeo cmd turret_stop (queued, edge release)")
+                    state["_turret_stop_sent_mono"] = now
+                    state["last_turret_smooth"] = None
+                    state["turret_release_from"] = None
         else:
             state["turret_release_from"] = None
         state["turret_dir"] = None
@@ -646,6 +657,9 @@ class RomeoControlClient:
         self._tx_count_lock = threading.Lock()
         self._tx_count = 0
         self._tx_window_t0 = time.monotonic()
+        self._battery_lock = threading.Lock()
+        self._battery_v: float | None = None
+        self._battery_mono: float = 0.0
 
     def _ensure_writer(self) -> None:
         if self._writer is None or not self._writer.is_alive():
@@ -679,6 +693,9 @@ class RomeoControlClient:
                     pass
             self._sock = s
             self._buf = b""
+        with self._battery_lock:
+            self._battery_v = None
+            self._battery_mono = 0.0
         (log.debug if quiet else log.info)(
             "Romeo control: TCP подключён %s:%s (rx_timeout=%.2fс)",
             self._host,
@@ -723,6 +740,15 @@ class RomeoControlClient:
     def is_connected(self) -> bool:
         with self._sock_lock:
             return self._sock is not None
+
+    def get_battery_v(self) -> tuple[float | None, float]:
+        """Напряжение АКБ (В) из последнего JSON с полем battery_v; второе значение — возраст снимка, с."""
+        with self._battery_lock:
+            v = self._battery_v
+            t0 = self._battery_mono
+        if v is None or t0 <= 0.0:
+            return None, 1e9
+        return v, max(0.0, time.monotonic() - t0)
 
     def _enqueue(self, payload: bytes) -> None:
         with self._q_seen_lock:
@@ -849,6 +875,12 @@ class RomeoControlClient:
                 log.info("romeo RX (try=%d): %s", attempt, out)
             elif isinstance(out, dict) and not out.get("ok", True):
                 log.warning("Romeo control: ответ ok=false: %s", out)
+            if isinstance(out, dict):
+                bv = out.get("battery_v")
+                if isinstance(bv, (int, float)):
+                    with self._battery_lock:
+                        self._battery_v = float(bv)
+                        self._battery_mono = time.monotonic()
             if attempt > 1:
                 log.info(
                     "Romeo control: команда подтверждена с попытки %d: %s",
@@ -979,6 +1011,7 @@ def _romeo_keyboard(
                 romeo.send_json_cmd(cmd_sm)
                 log.debug("romeo cmd %s (queued, edge press)", cmd_sm)
                 state["last_turret_smooth"] = td
+                state["_turret_stop_sent_mono"] = 0.0
         elif prev_smooth is not None:
             g0 = state.get("turret_smooth_stop_grace_from")
             if turret_grace_sec <= 0.0:
@@ -989,10 +1022,13 @@ def _romeo_keyboard(
             else:
                 release_now = now - float(g0) >= turret_grace_sec
             if release_now:
-                romeo.send_json_cmd({"action": "turret_stop"})
-                log.debug("romeo cmd turret_stop (queued, edge release)")
-                state["last_turret_smooth"] = None
-                state["turret_smooth_stop_grace_from"] = None
+                last_stop = float(state.get("_turret_stop_sent_mono", 0.0))
+                if now - last_stop >= _TURRET_STOP_MIN_INTERVAL_S:
+                    romeo.send_json_cmd({"action": "turret_stop"})
+                    log.debug("romeo cmd turret_stop (queued, edge release)")
+                    state["_turret_stop_sent_mono"] = now
+                    state["last_turret_smooth"] = None
+                    state["turret_smooth_stop_grace_from"] = None
         else:
             state["turret_smooth_stop_grace_from"] = None
         state["turret_dir"] = None
@@ -1031,7 +1067,7 @@ def _romeo_keyboard(
 
 
 def _display_resize_for_show(frame, max_w: int | None):
-    """Уменьшение по ширине перед показом: меньше пикселей → выше реальный FPS окна."""
+    """Уменьшение по ширине перед показом: INTER_AREA даёт аккуратное прореживание."""
     import cv2
 
     if max_w is None or max_w <= 0:
@@ -1041,6 +1077,246 @@ def _display_resize_for_show(frame, max_w: int | None):
         return frame
     nh = max(1, int(round(h * (max_w / float(w)))))
     return cv2.resize(frame, (max_w, nh), interpolation=cv2.INTER_AREA)
+
+
+def _display_soften_for_show(frame, sigma: float):
+    """Лёгкое Gaussian по кадру предпросмотра: меньше ступенек и блоков JPEG, мягче деталь."""
+    import cv2
+
+    if sigma <= 0.0:
+        return frame
+    s = min(3.0, max(0.05, float(sigma)))
+    return cv2.GaussianBlur(frame, (0, 0), s)
+
+
+def _wifi_signal_percent_win() -> int | None:
+    """Уровень сигнала Wi‑Fi на этом ПК (0–100), если есть активный WLAN. Иначе None."""
+    if sys.platform != "win32":
+        return None
+    kwargs: dict = {
+        "args": ["netsh", "wlan", "show", "interfaces"],
+        "capture_output": True,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+        "timeout": 1.2,
+    }
+    if hasattr(subprocess, "CREATE_NO_WINDOW"):
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    try:
+        r = subprocess.run(**kwargs)
+    except (subprocess.TimeoutExpired, OSError, FileNotFoundError):
+        return None
+    if r.returncode != 0 or not (r.stdout or "").strip():
+        return None
+    txt = r.stdout
+    m = re.search(
+        r"(?:Signal|Сигнал|Уровень\s+сигнала\s+сети)\s*:\s*(\d+)\s*%",
+        txt,
+        re.IGNORECASE,
+    )
+    if not m:
+        return None
+    return max(0, min(100, int(m.group(1))))
+
+
+def _overlay_link_meter_top_right(frame, wifi_pct: int | None) -> None:
+    """Полупрозрачная плашка справа сверху: пиктограмма танка + шкала «сила Wi‑Fi» + проценты."""
+    import cv2
+    import numpy as np
+
+    h, w = frame.shape[:2]
+    if w < 140 or h < 52:
+        return
+
+    pw, ph = 118, 42
+    margin = 8
+    x1 = w - margin - pw
+    y1 = margin
+    x2, y2 = x1 + pw, y1 + ph
+    roi = frame[y1:y2, x1:x2]
+    overlay = np.zeros_like(roi)
+    overlay[:] = (42, 46, 52)
+    cv2.rectangle(overlay, (0, 0), (pw - 1, ph - 1), (78, 86, 96), 1, cv2.LINE_AA)
+    blended = cv2.addWeighted(roi.astype(np.float32), 0.45, overlay.astype(np.float32), 0.55, 0)
+    frame[y1:y2, x1:x2] = blended.astype(np.uint8)
+
+    if wifi_pct is None:
+        bar_on = (118, 122, 128)
+        tank_lo, tank_hi = (108, 112, 118), (138, 145, 152)
+    elif wifi_pct < 28:
+        bar_on = (86, 72, 230)
+        tank_lo, tank_hi = (100, 90, 210), (150, 130, 255)
+    elif wifi_pct < 55:
+        bar_on = (80, 175, 255)
+        tank_lo, tank_hi = (110, 190, 255), (160, 220, 255)
+    else:
+        bar_on = (100, 200, 120)
+        tank_lo, tank_hi = (100, 170, 110), (140, 230, 150)
+
+    tx, ty = x1 + 5, y1 + 9
+    cv2.rectangle(frame, (tx + 2, ty + 19), (tx + 28, ty + 30), tank_lo, -1, cv2.LINE_AA)
+    cv2.rectangle(frame, (tx + 4, ty + 11), (tx + 24, ty + 20), tank_hi, -1, cv2.LINE_AA)
+    cv2.rectangle(frame, (tx + 10, ty + 5), (tx + 18, ty + 13), tank_hi, -1, cv2.LINE_AA)
+    cv2.line(frame, (tx + 18, ty + 9), (tx + 30, ty + 9), tank_hi, 1, cv2.LINE_AA)
+
+    bx0 = x1 + 46
+    by0 = y1 + ph - 8
+    if wifi_pct is None:
+        bars_on = 0
+    elif wifi_pct >= 82:
+        bars_on = 4
+    elif wifi_pct >= 58:
+        bars_on = 3
+    elif wifi_pct >= 32:
+        bars_on = 2
+    elif wifi_pct >= 8:
+        bars_on = 1
+    else:
+        bars_on = 1
+    gap, bw = 3, 5
+    bar_off = (58, 58, 62)
+    for i in range(4):
+        bh = 5 + i * 5
+        xa = bx0 + i * (bw + gap)
+        ya = by0 - bh
+        c = bar_on if i < bars_on else bar_off
+        cv2.rectangle(frame, (xa, ya), (xa + bw - 1, by0 - 1), c, -1, cv2.LINE_AA)
+
+    lf = cv2.FONT_HERSHEY_SIMPLEX
+    fs = 0.38
+    label = "--" if wifi_pct is None else f"{wifi_pct}%"
+    tw, th = cv2.getTextSize(label, lf, fs, 1)[0]
+    cv2.putText(
+        frame,
+        label,
+        (x2 - int(tw) - 5, y1 + 16),
+        lf,
+        fs,
+        (218, 224, 230),
+        1,
+        cv2.LINE_AA,
+    )
+
+
+def _format_pi_battery_v_text(v: float) -> str:
+    """Строка для HUD: то же float, что пришло в JSON battery_v (без шкалы и пересчёта на ПК)."""
+    return f"{format(float(v), '.12g')} V"
+
+
+# Ниже порога — предупреждение на HUD (напряжение с Pi не пересчитывается).
+_BATTERY_LOW_WARN_V = 16.0
+_BATTERY_LOW_WARN_LINE1 = "Attention: replace the battery."
+_BATTERY_LOW_WARN_LINE2 = "Degradation has started."
+
+
+def _overlay_battery_meter_top_right(
+    frame,
+    battery_v: float | None,
+    stale_s: float,
+    *,
+    below_wifi: bool,
+    margin: int = 8,
+    poll_interval_s: float = 30.0,
+) -> None:
+    """Плашка АКБ под Wi‑Fi: battery_v с Pi; при U < 16 В — красное мигание + текст предупреждения."""
+    import cv2
+    import numpy as np
+
+    h, w = frame.shape[:2]
+    lf = cv2.FONT_HERSHEY_SIMPLEX
+    fs = 0.42
+    fs_warn = 0.28
+
+    stale_lim = max(50.0, float(poll_interval_s) * 2.2)
+    stale = stale_s > stale_lim
+    if battery_v is None or stale:
+        label = "-- V"
+        low_batt = False
+    else:
+        v = float(battery_v)
+        label = _format_pi_battery_v_text(v)
+        low_batt = v < _BATTERY_LOW_WARN_V
+
+    tw, _ = cv2.getTextSize(label, lf, fs, 1)[0]
+    if low_batt:
+        tw1, _ = cv2.getTextSize(_BATTERY_LOW_WARN_LINE1, lf, fs_warn, 1)[0]
+        tw2, _ = cv2.getTextSize(_BATTERY_LOW_WARN_LINE2, lf, fs_warn, 1)[0]
+        tw_extra = max(tw1, tw2)
+    else:
+        tw_extra = 0
+
+    pw = max(96, 34 + max(tw, tw_extra) + 16)
+    if w < pw + margin * 2:
+        return
+
+    ph = 38 + (34 if low_batt else 0)
+    wifi_ph, gap = 42, 8
+    y1 = margin + wifi_ph + gap if below_wifi else margin
+    if y1 + ph > h - 4:
+        return
+
+    x1 = w - margin - pw
+    x2 = x1 + pw
+    y2 = y1 + ph
+    roi = frame[y1:y2, x1:x2]
+    overlay = np.zeros_like(roi)
+    blink = int(time.monotonic() * 2.0) % 2
+    if low_batt and blink:
+        overlay[:] = (35, 35, 160)
+        border_bgr = (50, 50, 230)
+        roi_w, bg_w = 0.22, 0.78
+    else:
+        overlay[:] = (38, 44, 50)
+        border_bgr = (72, 82, 92) if not low_batt else (70, 75, 140)
+        roi_w, bg_w = 0.45, 0.55
+
+    cv2.rectangle(overlay, (0, 0), (pw - 1, ph - 1), border_bgr, 1, cv2.LINE_AA)
+    blended = cv2.addWeighted(roi.astype(np.float32), roi_w, overlay.astype(np.float32), bg_w, 0)
+    frame[y1:y2, x1:x2] = blended.astype(np.uint8)
+
+    ix, iy = x1 + 5, y1 + 8
+    if low_batt and blink:
+        body, tip = (90, 90, 240), (70, 70, 220)
+    elif not stale:
+        body, tip = (200, 205, 210), (175, 180, 185)
+    else:
+        body, tip = (120, 125, 130), (95, 100, 105)
+    cv2.rectangle(frame, (ix + 3, iy), (ix + 18, iy + 18), body, -1, cv2.LINE_AA)
+    cv2.rectangle(frame, (ix + 8, iy - 3), (ix + 13, iy), tip, -1, cv2.LINE_AA)
+    cv2.rectangle(frame, (ix + 8, iy + 5), (ix + 12, iy + 12), (35, 38, 42), -1, cv2.LINE_AA)
+
+    if low_batt:
+        volt_color = (60, 60, 255) if blink else (120, 120, 255)
+        warn_color = (70, 70, 255) if blink else (140, 140, 255)
+    elif not stale:
+        volt_color = (220, 226, 232)
+    else:
+        volt_color = (140, 145, 150)
+
+    cv2.putText(
+        frame,
+        label,
+        (x2 - int(tw) - 6, y1 + 14),
+        lf,
+        fs,
+        volt_color,
+        1,
+        cv2.LINE_AA,
+    )
+    if low_batt:
+        for i, line in enumerate((_BATTERY_LOW_WARN_LINE1, _BATTERY_LOW_WARN_LINE2)):
+            twl, _ = cv2.getTextSize(line, lf, fs_warn, 1)[0]
+            cv2.putText(
+                frame,
+                line,
+                (x2 - int(twl) - 6, y1 + 32 + i * 14),
+                lf,
+                fs_warn,
+                warn_color,
+                1,
+                cv2.LINE_AA,
+            )
 
 
 def stream_to_window(
@@ -1056,7 +1332,12 @@ def stream_to_window(
     romeo_drive_stop_grace_ms: float = 80.0,
     romeo_drive_mode: str = "hold",
     display_max_width: int | None = None,
+    display_soften_sigma: float = 0.0,
     show_fps_title: bool = False,
+    show_link_meter: bool = True,
+    show_battery_meter: bool = True,
+    battery_poll_s: float = 30.0,
+    battery_adc_ch: int | None = None,
 ) -> bool:
     """Возвращает True, если пользователь нажал Q/Esc (выход), False — если поток
     видео оборвался по сети/EOF (вызывающая сторона может переподключиться).
@@ -1160,6 +1441,7 @@ def stream_to_window(
                     log.warning("кадр: imdecode не распознал JPEG")
                     continue
                 disp = _display_resize_for_show(frame, display_max_width)
+                disp = _display_soften_for_show(disp, display_soften_sigma)
                 t_dec = time.monotonic()
                 dropped = _put_drop_to(frame_q, (disp, len(jpeg), t_recv))
                 with diag_lock:
@@ -1198,6 +1480,10 @@ def stream_to_window(
     win_hwnd: int | None = None
     if use_win_keys:
         log.info("Ввод: Win32 GetAsyncKeyState (без autorepeat). Окно %r должно быть в фокусе.", window)
+
+    link_meter_next_poll = 0.0
+    link_meter_wifi: int | None = None
+    battery_next_poll = 0.0
 
     def _quit_keypress() -> bool:
         if use_win_keys:
@@ -1335,6 +1621,29 @@ def stream_to_window(
                 prev_key = key
                 continue
 
+            t_mono = time.monotonic()
+            if show_link_meter:
+                if t_mono >= link_meter_next_poll:
+                    link_meter_next_poll = t_mono + 1.5
+                    link_meter_wifi = _wifi_signal_percent_win()
+                _overlay_link_meter_top_right(last_np, link_meter_wifi)
+            if show_battery_meter and romeo is not None:
+                poll_iv = max(5.0, float(battery_poll_s))
+                if t_mono >= battery_next_poll:
+                    battery_next_poll = t_mono + poll_iv
+                    adc_obj: dict[str, object] = {"action": "adc_read"}
+                    if battery_adc_ch is not None:
+                        adc_obj["ch"] = int(battery_adc_ch)
+                    romeo.send_json_cmd(adc_obj)
+                bv, b_age = romeo.get_battery_v()
+                _overlay_battery_meter_top_right(
+                    last_np,
+                    bv,
+                    b_age,
+                    below_wifi=show_link_meter,
+                    poll_interval_s=float(battery_poll_s),
+                )
+
             cv2.imshow(window, last_np)
             if n == 1:
                 _try_raise_preview_window(window)
@@ -1417,6 +1726,11 @@ def run_listen(
     romeo_max_attempts: int,
     display_max_width: int | None,
     show_fps_title: bool,
+    show_link_meter: bool,
+    show_battery_meter: bool,
+    battery_poll_s: float,
+    battery_adc_ch: int | None,
+    display_soften_sigma: float,
 ) -> None:
     udp_sock: socket.socket | None = None
     disc_control: int | None = None
@@ -1478,7 +1792,12 @@ def run_listen(
                     romeo_drive_stop_grace_ms=romeo_drive_stop_grace_ms,
                     romeo_drive_mode=romeo_drive_mode,
                     display_max_width=display_max_width,
+                    display_soften_sigma=display_soften_sigma,
                     show_fps_title=show_fps_title,
+                    show_link_meter=show_link_meter,
+                    show_battery_meter=show_battery_meter,
+                    battery_poll_s=battery_poll_s,
+                    battery_adc_ch=battery_adc_ch,
                 )
             finally:
                 if romeo is not None:
@@ -1514,6 +1833,11 @@ def run_connect(
     reconnect_delay: float,
     display_max_width: int | None,
     show_fps_title: bool,
+    show_link_meter: bool,
+    show_battery_meter: bool,
+    battery_poll_s: float,
+    battery_adc_ch: int | None,
+    display_soften_sigma: float,
 ) -> None:
     if host is None:
         if discover_port <= 0:
@@ -1599,7 +1923,12 @@ def run_connect(
                     romeo_drive_stop_grace_ms=romeo_drive_stop_grace_ms,
                     romeo_drive_mode=romeo_drive_mode,
                     display_max_width=display_max_width,
+                    display_soften_sigma=display_soften_sigma,
                     show_fps_title=show_fps_title,
+                    show_link_meter=show_link_meter,
+                    show_battery_meter=show_battery_meter,
+                    battery_poll_s=battery_poll_s,
+                    battery_adc_ch=battery_adc_ch,
                 )
             finally:
                 try:
@@ -1735,9 +2064,39 @@ def main() -> None:
         help="Max width in pixels before imshow (0 = native; e.g. 960 for faster UI)",
     )
     p_listen.add_argument(
+        "--display-soften",
+        type=float,
+        default=0.0,
+        metavar="SIGMA",
+        help="После масштаба: Gaussian blur, σ пикселей (0=выкл; попробуйте 0.5–1.2 — меньше лесенки JPEG; "
+             "смягчает деталь и нагружает CPU)",
+    )
+    p_listen.add_argument(
         "--show-fps",
         action="store_true",
         help="Show decoded FPS in window title",
+    )
+    p_listen.add_argument(
+        "--no-link-meter",
+        action="store_true",
+        help="Не рисовать справа сверху индикатор Wi‑Fi + танк (Windows: netsh wlan)",
+    )
+    p_listen.add_argument(
+        "--no-battery-meter",
+        action="store_true",
+        help="Не показывать индикатор АКБ (JSON adc_read → battery_v с Pi)",
+    )
+    p_listen.add_argument(
+        "--battery-poll-sec",
+        type=float,
+        default=30.0,
+        help="Интервал опроса {\"action\":\"adc_read\"} на Romeo, с (по умолчанию 30; не чаще 5)",
+    )
+    p_listen.add_argument(
+        "--battery-adc-ch",
+        type=int,
+        default=None,
+        help="Если задано — в adc_read добавляется \"ch\" (иначе команда без канала)",
     )
 
     p_conn = sub.add_parser(
@@ -1859,9 +2218,38 @@ def main() -> None:
         help="Max width in pixels before imshow (0 = native)",
     )
     p_conn.add_argument(
+        "--display-soften",
+        type=float,
+        default=0.0,
+        metavar="SIGMA",
+        help="После масштаба: Gaussian σ (0=выкл; 0.5–1.2 — сгладить блоки MJPEG, цена — деталь и CPU)",
+    )
+    p_conn.add_argument(
         "--show-fps",
         action="store_true",
         help="Show decoded FPS in window title",
+    )
+    p_conn.add_argument(
+        "--no-link-meter",
+        action="store_true",
+        help="Не рисовать справа сверху индикатор Wi‑Fi + танк (Windows: netsh wlan)",
+    )
+    p_conn.add_argument(
+        "--no-battery-meter",
+        action="store_true",
+        help="Не показывать индикатор АКБ (JSON adc_read → battery_v с Pi)",
+    )
+    p_conn.add_argument(
+        "--battery-poll-sec",
+        type=float,
+        default=30.0,
+        help="Интервал опроса adc_read на Romeo, с (по умолчанию 30; не чаще 5)",
+    )
+    p_conn.add_argument(
+        "--battery-adc-ch",
+        type=int,
+        default=None,
+        help="Опционально: поле ch в JSON adc_read",
     )
     p_conn.add_argument("--window", default="Pi camera")
 
@@ -1889,6 +2277,11 @@ def main() -> None:
             args.romeo_max_attempts,
             dmw,
             args.show_fps,
+            not args.no_link_meter,
+            not args.no_battery_meter,
+            args.battery_poll_sec,
+            args.battery_adc_ch,
+            args.display_soften,
         )
     elif args.cmd == "connect":
         dmw = args.display_max_width if args.display_max_width > 0 else None
@@ -1915,6 +2308,11 @@ def main() -> None:
             args.reconnect_delay,
             dmw,
             args.show_fps,
+            not args.no_link_meter,
+            not args.no_battery_meter,
+            args.battery_poll_sec,
+            args.battery_adc_ch,
+            args.display_soften,
         )
 
 
