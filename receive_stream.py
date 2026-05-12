@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Приёмник видео для Windows: TCP (MJPEG с префиксом длины) + UDP discovery,
-совместим со stream_camera.py на Raspberry Pi.
+Приёмник видео для Windows: по умолчанию H.264 over TCP через внешний `ffplay`
+и UDP discovery + Romeo control. Legacy-режим TCP MJPEG с префиксом длины
+оставлен как совместимость (`--video-backend jpeg_tcp`).
 
 Режим «ПК ждёт Pi» (Pi: python stream_camera.py send --host auto):
   python receive_stream.py listen --port 5000
@@ -19,13 +20,12 @@ tcp и control). Секрет: --discover-token (должен совпадать
   python receive_stream.py connect            # авто-поиск
   python receive_stream.py connect --host 10.42.0.1 --port 5000   # явно
 
-Видео конвейер — три независимых стадии (на трёх потоках):
+По умолчанию видео идёт как сырой H.264 over TCP и отображается внешним
+`ffplay`, чтобы Windows-клиент не пытался распарсить поток как JPEG.
+Legacy MJPEG-конвейер OpenCV сохранён только для `--video-backend jpeg_tcp`:
   1) video-rx:  только TCP recv → raw_q (maxsize=1, drop-old).
   2) video-dec: raw_q → cv2.imdecode + resize → frame_q (maxsize=1, drop-old).
   3) main:      frame_q → cv2.imshow + опрос ввода + UI (Wi‑Fi, АКБ из Romeo adc_read/battery_v).
-Декод и сетевой recv разнесены, чтобы всплеск декодирования (или нагрузка
-от управления) не замедлял дренаж TCP — иначе у Pi заполняется буфер
-отправки и видео визуально подлагивает.
 
 Контроль (Romeo) — request/response: на каждую команду ждём JSON-ответ Pi
 в пределах --romeo-rx-timeout (по умолчанию 0.6 с). Если ответа нет —
@@ -39,7 +39,7 @@ romeo-tx пишет/читает/повторяет, чтобы UI не блок
 Логи отдельных команд идут на DEBUG (видно при -v), чтобы под нагрузкой не
 нагружать stdout. Сводка скорости команд `romeo TX: …/с` остаётся на INFO.
 
-Качество / FPS (в основном настройка на Pi, не на ПК):
+Качество / FPS (в основном настройка на Pi, не на ПК, актуально для legacy MJPEG):
   На Pi: меньше разрешение и выше --jpeg-quality (например 85–92) дают меньше «мыла» при движении,
   но больше трафика; --fps и загрузка CPU тоже влияют.
   На ПК: --display-max-width 960 — уменьшить картинку перед imshow (быстрее UI);
@@ -67,8 +67,10 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import queue
 import re
+import shutil
 import socket
 import struct
 import subprocess
@@ -79,6 +81,10 @@ import time
 log = logging.getLogger("camrecv")
 
 _VIDEO_EOF = object()
+
+VIDEO_BACKEND_EXTERNAL_FFPLAY = "external_ffplay"
+VIDEO_BACKEND_JPEG_TCP = "jpeg_tcp"
+VIDEO_BACKEND_DEFAULT = VIDEO_BACKEND_EXTERNAL_FFPLAY
 
 # Минимум между turret_stop на провод: при дребезге клавиш/фокуса Pi получает пачку
 # одинаковых команд, writer блокируется на ответах — «зависание» управления.
@@ -190,6 +196,13 @@ _VK_W, _VK_A, _VK_S, _VK_D = 0x57, 0x41, 0x53, 0x44
 _VK_I, _VK_J, _VK_K, _VK_L = 0x49, 0x4A, 0x4B, 0x4C
 _VK_LEFT, _VK_UP, _VK_RIGHT, _VK_DOWN = 0x25, 0x26, 0x27, 0x28
 _VK_SPACE, _VK_ESC, _VK_Q, _VK_H, _VK_M, _VK_X = 0x20, 0x1B, 0x51, 0x48, 0x4D, 0x58
+_VK_P = 0x50
+_VK_0, _VK_1, _VK_2, _VK_3, _VK_4 = 0x30, 0x31, 0x32, 0x33, 0x34
+_VK_5, _VK_6, _VK_7, _VK_8 = 0x35, 0x36, 0x37, 0x38
+_VK_NUMPAD0, _VK_NUMPAD1, _VK_NUMPAD2, _VK_NUMPAD3, _VK_NUMPAD4 = 0x60, 0x61, 0x62, 0x63, 0x64
+_VK_NUMPAD5, _VK_NUMPAD6, _VK_NUMPAD7, _VK_NUMPAD8 = 0x65, 0x66, 0x67, 0x68
+_VK_ADD, _VK_SUBTRACT = 0x6B, 0x6D
+_VK_OEM_PLUS, _VK_OEM_MINUS = 0xBB, 0xBD
 
 # Клавиши Romeo на Win32: autorepeat в очереди окна OpenCV не нужен (состояние
 # снимаем через GetAsyncKeyState). Иначе waitKeyEx разгребает сотни WM_KEYDOWN
@@ -214,6 +227,29 @@ _WIN_ROMEO_DRAIN_VKS: frozenset[int] = frozenset(
         _VK_H,
         _VK_M,
         _VK_X,
+        _VK_P,
+        _VK_0,
+        _VK_1,
+        _VK_2,
+        _VK_3,
+        _VK_4,
+        _VK_5,
+        _VK_6,
+        _VK_7,
+        _VK_8,
+        _VK_NUMPAD0,
+        _VK_NUMPAD1,
+        _VK_NUMPAD2,
+        _VK_NUMPAD3,
+        _VK_NUMPAD4,
+        _VK_NUMPAD5,
+        _VK_NUMPAD6,
+        _VK_NUMPAD7,
+        _VK_NUMPAD8,
+        _VK_ADD,
+        _VK_SUBTRACT,
+        _VK_OEM_PLUS,
+        _VK_OEM_MINUS,
     }
 )
 
@@ -252,17 +288,19 @@ def _key_down_win(vk: int) -> bool:
     return bool(_user32.GetAsyncKeyState(vk) & 0x8000)
 
 
-def _read_input_state_win(window_hwnd: int | None) -> dict | None:
+def _read_input_state_win(window_hwnd: int | None, *, require_focus: bool = True) -> dict | None:
     """Снимок реального состояния клавиш (без autorepeat) на Windows.
 
-    Возвращает None, если окно превью не в фокусе — тогда команды не идут
-    (страховка: пользователь может работать в другом окне).
+    По умолчанию требует фокус окна превью/плеера. Для внешнего ffplay это
+    можно отключить, иначе его собственные hotkeys (W/A/S/стрелки/Space) будут
+    конфликтовать с управлением Romeo.
     """
     if _user32 is None:
         return None
-    fg = _user32.GetForegroundWindow()
-    if window_hwnd is None or not fg or fg != window_hwnd:
-        return {"focus": False}
+    if require_focus:
+        fg = _user32.GetForegroundWindow()
+        if window_hwnd is None or not fg or fg != window_hwnd:
+            return {"focus": False}
 
     drive_keys = {
         "forward": _key_down_win(_VK_W),
@@ -295,6 +333,18 @@ def _read_input_state_win(window_hwnd: int | None) -> dict | None:
         "home": _key_down_win(_VK_H),
         "save": _key_down_win(_VK_M),
         "quit": _key_down_win(_VK_Q) or _key_down_win(_VK_ESC),
+        "camera_preset_1": _key_down_win(_VK_1) or _key_down_win(_VK_NUMPAD1),
+        "camera_preset_2": _key_down_win(_VK_2) or _key_down_win(_VK_NUMPAD2),
+        "camera_preset_3": _key_down_win(_VK_3) or _key_down_win(_VK_NUMPAD3),
+        "camera_preset_4": _key_down_win(_VK_4) or _key_down_win(_VK_NUMPAD4),
+        "camera_preset_5": _key_down_win(_VK_5) or _key_down_win(_VK_NUMPAD5),
+        "camera_preset_6": _key_down_win(_VK_6) or _key_down_win(_VK_NUMPAD6),
+        "camera_preset_7": _key_down_win(_VK_7) or _key_down_win(_VK_NUMPAD7),
+        "camera_preset_8": _key_down_win(_VK_8) or _key_down_win(_VK_NUMPAD8),
+        "camera_zoom_in": _key_down_win(_VK_ADD) or _key_down_win(_VK_OEM_PLUS),
+        "camera_zoom_out": _key_down_win(_VK_SUBTRACT) or _key_down_win(_VK_OEM_MINUS),
+        "camera_zoom_reset": _key_down_win(_VK_0) or _key_down_win(_VK_NUMPAD0),
+        "camera_status": _key_down_win(_VK_P),
     }
 
 
@@ -489,6 +539,177 @@ def recv_jpeg_frame(sock: socket.socket) -> bytes:
     if length <= 0 or length > 50 * 1024 * 1024:
         raise ValueError(f"некорректная длина кадра: {length}")
     return read_exact(sock, length)
+
+
+def _ffplay_tcp_url(host: str, port: int) -> str:
+    return f"tcp://{host}:{port}"
+
+
+def _normalize_ffplay_candidate(path: str | None) -> str | None:
+    if not path:
+        return None
+    p = os.path.expandvars(os.path.expanduser(str(path).strip().strip('"')))
+    if not p:
+        return None
+    if os.path.isdir(p):
+        return os.path.join(p, "ffplay.exe" if _IS_WIN else "ffplay")
+    return p
+
+
+def _find_ffplay_in_winget_packages(local_appdata: str | None) -> str | None:
+    if not _IS_WIN or not local_appdata:
+        return None
+    root = os.path.join(local_appdata, "Microsoft", "WinGet", "Packages")
+    if not os.path.isdir(root):
+        return None
+    try:
+        for cur_root, _dirs, files in os.walk(root):
+            if "ffplay.exe" in files:
+                return os.path.join(cur_root, "ffplay.exe")
+    except OSError:
+        return None
+    return None
+
+
+def _resolve_ffplay_path(ffplay_path: str | None = None) -> tuple[str | None, list[str]]:
+    seen: set[str] = set()
+    candidates: list[str] = []
+
+    def add(candidate: str | None) -> None:
+        p = _normalize_ffplay_candidate(candidate)
+        if not p:
+            return
+        k = os.path.normcase(os.path.normpath(p))
+        if k in seen:
+            return
+        seen.add(k)
+        candidates.append(p)
+
+    add(ffplay_path)
+    add(os.environ.get("FFPLAY_PATH"))
+    add("ffplay.exe" if _IS_WIN else "ffplay")
+    add("ffplay")
+
+    if _IS_WIN:
+        local = os.environ.get("LOCALAPPDATA")
+        pf = os.environ.get("ProgramFiles")
+        pf86 = os.environ.get("ProgramFiles(x86)")
+        choco = os.environ.get("ChocolateyInstall")
+        user = os.environ.get("USERPROFILE")
+        scoop_root = os.environ.get("SCOOP")
+
+        for root in (local, pf, pf86):
+            if root:
+                add(os.path.join(root, "ffmpeg", "bin", "ffplay.exe"))
+                add(os.path.join(root, "FFmpeg", "bin", "ffplay.exe"))
+        if local:
+            add(os.path.join(local, "Microsoft", "WinGet", "Links", "ffplay.exe"))
+            add(os.path.join(local, "Programs", "ffmpeg", "bin", "ffplay.exe"))
+            add(os.path.join(local, "Programs", "FFmpeg", "bin", "ffplay.exe"))
+            add(_find_ffplay_in_winget_packages(local))
+        if choco:
+            add(os.path.join(choco, "bin", "ffplay.exe"))
+        if user:
+            add(os.path.join(user, "scoop", "shims", "ffplay.exe"))
+            add(os.path.join(user, "scoop", "apps", "ffmpeg", "current", "bin", "ffplay.exe"))
+        if scoop_root:
+            add(os.path.join(scoop_root, "shims", "ffplay.exe"))
+            add(os.path.join(scoop_root, "apps", "ffmpeg", "current", "bin", "ffplay.exe"))
+
+    for candidate in candidates:
+        if os.path.basename(candidate) == candidate and not os.path.dirname(candidate):
+            resolved = shutil.which(candidate)
+            if resolved:
+                return resolved, candidates
+        elif os.path.isfile(candidate):
+            return os.path.abspath(candidate), candidates
+    return None, candidates
+
+
+def start_video_player(
+    host: str,
+    port: int,
+    *,
+    window_title: str | None = None,
+    ffplay_path: str | None = None,
+) -> subprocess.Popen | None:
+    ffplay, checked = _resolve_ffplay_path(ffplay_path)
+    if not ffplay:
+        origin = f" --ffplay-path={ffplay_path!r}" if ffplay_path else ""
+        log.error(
+            "Видео: ffplay не найден%s. Установите FFmpeg/ffplay на ПК, либо укажите "
+            "--ffplay-path, либо задайте FFPLAY_PATH.",
+            origin,
+        )
+        if checked:
+            preview = ", ".join(checked[:6])
+            if len(checked) > 6:
+                preview += ", ..."
+            log.info("Видео: проверены пути ffplay: %s", preview)
+        return None
+
+    cmd = [
+        ffplay,
+        "-loglevel",
+        "warning",
+        "-nostats",
+        "-sync",
+        "ext",
+        "-an",
+        "-sn",
+        "-fflags",
+        "nobuffer",
+        "-flags",
+        "low_delay",
+        "-framedrop",
+        "-avioflags",
+        "direct",
+        "-probesize",
+        "32",
+        "-analyzeduration",
+        "0",
+        "-f",
+        "h264",
+    ]
+    if window_title:
+        cmd.extend(["-window_title", window_title])
+    cmd.append(_ffplay_tcp_url(host, port))
+
+    kwargs: dict[str, object] = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    if hasattr(subprocess, "CREATE_NO_WINDOW"):
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    try:
+        proc = subprocess.Popen(cmd, **kwargs)
+    except OSError as e:
+        log.error("Видео: не удалось запустить ffplay для %s:%s: %s", host, port, e)
+        return None
+
+    log.info("Видео: запущен ffplay (%s) для %s", ffplay, _ffplay_tcp_url(host, port))
+    return proc
+
+
+def stop_video_player(player: subprocess.Popen | None, timeout: float = 2.0) -> None:
+    if player is None or player.poll() is not None:
+        return
+    try:
+        player.terminate()
+    except OSError:
+        return
+    try:
+        player.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            player.kill()
+        except OSError:
+            return
+        try:
+            player.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            pass
 
 
 def _discovery_responder_loop(
@@ -929,6 +1150,13 @@ def _turret_dir_from_u_key(u: int, key: int) -> str | None:
 def _romeo_turret_mode_is_smooth(mode: str) -> bool:
     """Плавная башня: turret_smooth + turret_stop (velocity — устаревший синоним в CLI)."""
     return mode in ("smooth", "velocity")
+
+
+def _stop_romeo_motion(romeo: RomeoControlClient | None) -> None:
+    if romeo is None:
+        return
+    romeo.send_json_cmd({"action": "turret_stop"})
+    romeo.send_json_cmd({"action": "drive", "dir": "stop"})
 
 
 def _romeo_keyboard(
@@ -1709,10 +1937,105 @@ def stream_to_window(
     return user_quit
 
 
+def run_external_video_session(
+    host: str,
+    port: int,
+    window: str,
+    romeo: RomeoControlClient | None = None,
+    *,
+    ffplay_path: str | None = None,
+    romeo_missing_warn: str | None = None,
+    romeo_turret_mode: str = "smooth",
+    romeo_turret_smooth_v: float = 0.0,
+    romeo_turret_smooth_stop_grace_ms: float = 80.0,
+    romeo_drive_stop_grace_ms: float = 80.0,
+    romeo_drive_mode: str = "hold",
+) -> bool:
+    """Запускает внешний ffplay и держит только цикл клавиатуры/управления.
+
+    Возвращает True, если пользователь нажал Q/Esc, иначе False
+    (например, ffplay закрылся или поток оборвался).
+    """
+    warned_missing = False
+    if romeo_missing_warn:
+        log.warning("%s", romeo_missing_warn)
+        warned_missing = True
+    if romeo is not None:
+        log.debug("Romeo: WASD; IJKL/стрелки башня; Q/Esc — выход.")
+    elif not warned_missing:
+        log.info("Romeo отключён (--romeo-control-port 0). Только видео.")
+
+    player = start_video_player(host, port, window_title=window, ffplay_path=ffplay_path)
+    if player is None:
+        raise RuntimeError("ffplay unavailable")
+
+    repeat_state: dict = {
+        "turret_dir": None,
+        "drive_dir": None,
+        "drive_grace_from": None,
+        "drive_release_from": None,
+        "last_turret_smooth": None,
+        "turret_smooth_stop_grace_from": None,
+        "turret_release_from": None,
+        "oneshot_stop": False,
+        "oneshot_home": False,
+        "oneshot_save": False,
+    }
+
+    use_win_keys = _IS_WIN and _user32 is not None
+    if use_win_keys:
+        log.info(
+            "Ввод: Win32 GetAsyncKeyState (без autorepeat, глобально). Фокус окна ffplay не требуется: "
+            "иначе его hotkeys конфликтуют с WASD/стрелками/Space.",
+        )
+    elif romeo is not None:
+        log.warning("external_ffplay: горячие клавиши Romeo без окна OpenCV поддерживаются только на Windows; для выхода используйте Ctrl+C.")
+
+    user_quit = False
+    try:
+        while True:
+            rc = player.poll()
+            if rc is not None:
+                if rc == 0:
+                    log.info("Видео: ffplay завершился")
+                else:
+                    log.warning("Видео: ffplay завершился с кодом %s", rc)
+                break
+
+            pressed = None
+            if use_win_keys:
+                pressed = _read_input_state_win(None, require_focus=False)
+                if pressed and pressed.get("quit"):
+                    log.info("выход по клавише")
+                    _stop_romeo_motion(romeo)
+                    user_quit = True
+                    break
+
+            if romeo is not None:
+                if use_win_keys:
+                    _romeo_keyboard_state(
+                        romeo,
+                        pressed,
+                        turret_mode=romeo_turret_mode,
+                        turret_smooth_v=romeo_turret_smooth_v,
+                        drive_mode=romeo_drive_mode,
+                        drive_release_debounce_ms=romeo_drive_stop_grace_ms,
+                        turret_release_debounce_ms=romeo_turret_smooth_stop_grace_ms,
+                        state=repeat_state,
+                    )
+
+            time.sleep(0.02)
+    finally:
+        stop_video_player(player)
+    return user_quit
+
+
 def run_listen(
     tcp_port: int,
     discover_port: int | None,
     discover_token: str | None,
+    video_backend: str,
+    ffplay_path: str | None,
     window: str,
     romeo_control_port: int,
     romeo_connect_timeout: float,
@@ -1732,6 +2055,15 @@ def run_listen(
     battery_adc_ch: int | None,
     display_soften_sigma: float,
 ) -> None:
+    if video_backend == VIDEO_BACKEND_EXTERNAL_FFPLAY:
+        log.error(
+            "Режим listen с --video-backend %s не поддержан. Для нового H.264-потока используйте "
+            "`connect --host ...`, либо legacy `--video-backend %s`.",
+            VIDEO_BACKEND_EXTERNAL_FFPLAY,
+            VIDEO_BACKEND_JPEG_TCP,
+        )
+        sys.exit(2)
+
     udp_sock: socket.socket | None = None
     disc_control: int | None = None
     if discover_port is not None and romeo_control_port > 0:
@@ -1813,6 +2145,8 @@ def run_listen(
 def run_connect(
     host: str | None,
     port: int,
+    video_backend: str,
+    ffplay_path: str | None,
     window: str,
     connect_timeout: float,
     romeo_control_port: int,
@@ -1882,59 +2216,113 @@ def run_connect(
     try:
         while True:
             attempt += 1
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            sock.settimeout(max(1.0, connect_timeout))
-            log.info(
-                "TCP видео: подключение к %s:%s (таймаут %.0f с, попытка %d)...",
-                host, port, connect_timeout, attempt,
-            )
-            try:
-                sock.connect((host, port))
-            except OSError as e:
-                log.error("TCP видео: не удалось подключиться: %s", e)
-                sock.close()
+            if video_backend == VIDEO_BACKEND_EXTERNAL_FFPLAY:
                 if attempt == 1 and host.startswith("10.42."):
-                    log.error(
-                        "Адрес 10.42.x — сеть точки Pi. Нужно подключить ПК к Wi‑Fi SSID малинки "
-                        "(Ethernet к роутеру не подставляет эту подсеть)."
+                    log.info(
+                        "TCP видео: запуск ffplay для %s:%s (попытка %d)...",
+                        host,
+                        port,
+                        attempt,
                     )
-                if not reconnect:
-                    sys.exit(1)
-                log.info("Повторная попытка через %.1f с... (Ctrl+C — отмена)", reconnect_delay)
-                try:
-                    time.sleep(reconnect_delay)
-                except KeyboardInterrupt:
-                    return
-                continue
-            sock.settimeout(None)
-            log.info("TCP видео: соединение установлено")
+                else:
+                    log.info("TCP видео: запуск ffplay для %s:%s (попытка %d)...", host, port, attempt)
 
-            try:
-                user_quit = stream_to_window(
-                    sock,
-                    window,
-                    romeo,
-                    romeo_debug=romeo_debug,
-                    romeo_missing_warn=miss,
-                    romeo_turret_mode=romeo_turret_mode,
-                    romeo_turret_smooth_v=romeo_turret_smooth_v,
-                    romeo_turret_smooth_stop_grace_ms=romeo_turret_smooth_stop_grace_ms,
-                    romeo_drive_stop_grace_ms=romeo_drive_stop_grace_ms,
-                    romeo_drive_mode=romeo_drive_mode,
-                    display_max_width=display_max_width,
-                    display_soften_sigma=display_soften_sigma,
-                    show_fps_title=show_fps_title,
-                    show_link_meter=show_link_meter,
-                    show_battery_meter=show_battery_meter,
-                    battery_poll_s=battery_poll_s,
-                    battery_adc_ch=battery_adc_ch,
-                )
-            finally:
+                if (
+                    display_max_width is not None
+                    or display_soften_sigma > 0.0
+                    or show_fps_title
+                    or show_link_meter
+                    or show_battery_meter
+                ):
+                    log.info(
+                        "Видео backend=%s: параметры OpenCV-превью/overlay игнорируются "
+                        "(display-max-width, display-soften, show-fps, link/battery meter).",
+                        VIDEO_BACKEND_EXTERNAL_FFPLAY,
+                    )
+                    display_max_width = None
+                    display_soften_sigma = 0.0
+                    show_fps_title = False
+                    show_link_meter = False
+                    show_battery_meter = False
+
                 try:
+                    user_quit = run_external_video_session(
+                        host,
+                        port,
+                        window,
+                        romeo,
+                        ffplay_path=ffplay_path,
+                        romeo_missing_warn=miss,
+                        romeo_turret_mode=romeo_turret_mode,
+                        romeo_turret_smooth_v=romeo_turret_smooth_v,
+                        romeo_turret_smooth_stop_grace_ms=romeo_turret_smooth_stop_grace_ms,
+                        romeo_drive_stop_grace_ms=romeo_drive_stop_grace_ms,
+                        romeo_drive_mode=romeo_drive_mode,
+                    )
+                except RuntimeError as e:
+                    log.error("TCP видео: %s", e)
+                    
+                    sys.exit(1)
+                if attempt == 1 and not user_quit and host.startswith("10.42."):
+                    log.warning(
+                        "Если ffplay не открыл поток с %s:%s, проверьте подключение ПК к Wi‑Fi SSID малинки.",
+                        host,
+                        port,
+                    )
+            else:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                sock.settimeout(max(1.0, connect_timeout))
+                log.info(
+                    "TCP видео: подключение к %s:%s (таймаут %.0f с, попытка %d)...",
+                    host, port, connect_timeout, attempt,
+                )
+                try:
+                    sock.connect((host, port))
+                except OSError as e:
+                    log.error("TCP видео: не удалось подключиться: %s", e)
                     sock.close()
-                except OSError:
-                    pass
+                    if attempt == 1 and host.startswith("10.42."):
+                        log.error(
+                            "Адрес 10.42.x — сеть точки Pi. Нужно подключить ПК к Wi‑Fi SSID малинки "
+                            "(Ethernet к роутеру не подставляет эту подсеть)."
+                        )
+                    if not reconnect:
+                        sys.exit(1)
+                    log.info("Повторная попытка через %.1f с... (Ctrl+C — отмена)", reconnect_delay)
+                    try:
+                        time.sleep(reconnect_delay)
+                    except KeyboardInterrupt:
+                        return
+                    continue
+                sock.settimeout(None)
+                log.info("TCP видео: соединение установлено")
+
+                try:
+                    user_quit = stream_to_window(
+                        sock,
+                        window,
+                        romeo,
+                        romeo_debug=romeo_debug,
+                        romeo_missing_warn=miss,
+                        romeo_turret_mode=romeo_turret_mode,
+                        romeo_turret_smooth_v=romeo_turret_smooth_v,
+                        romeo_turret_smooth_stop_grace_ms=romeo_turret_smooth_stop_grace_ms,
+                        romeo_drive_stop_grace_ms=romeo_drive_stop_grace_ms,
+                        romeo_drive_mode=romeo_drive_mode,
+                        display_max_width=display_max_width,
+                        display_soften_sigma=display_soften_sigma,
+                        show_fps_title=show_fps_title,
+                        show_link_meter=show_link_meter,
+                        show_battery_meter=show_battery_meter,
+                        battery_poll_s=battery_poll_s,
+                        battery_adc_ch=battery_adc_ch,
+                    )
+                finally:
+                    try:
+                        sock.close()
+                    except OSError:
+                        pass
 
             miss = None  # повторно не пугаем тем же предупреждением
 
@@ -1943,11 +2331,18 @@ def run_connect(
             if not reconnect:
                 return
 
-            log.warning(
-                "Связь с Pi разорвана. Авто-переподключение через %.1f с... "
-                "(F5/Q в окне видео — выход; Ctrl+C — выход в консоли)",
-                reconnect_delay,
-            )
+            if video_backend == VIDEO_BACKEND_EXTERNAL_FFPLAY:
+                log.warning(
+                    "Связь с Pi разорвана. Авто-переподключение через %.1f с... "
+                    "(Q/Esc в окне ffplay — выход; Ctrl+C — выход в консоли)",
+                    reconnect_delay,
+                )
+            else:
+                log.warning(
+                    "Связь с Pi разорвана. Авто-переподключение через %.1f с... "
+                    "(F5/Q в окне видео — выход; Ctrl+C — выход в консоли)",
+                    reconnect_delay,
+                )
             try:
                 time.sleep(reconnect_delay)
             except KeyboardInterrupt:
@@ -1959,7 +2354,7 @@ def run_connect(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Windows receiver for Pi camera stream (TCP MJPEG + UDP discovery)."
+        description="Windows receiver for Pi camera stream (H.264 over TCP via ffplay by default; legacy MJPEG available)."
     )
     parser.add_argument(
         "--log-level",
@@ -1975,6 +2370,13 @@ def main() -> None:
         help="Listen on TCP (+ UDP discovery for Pi: send --host auto)",
     )
     p_listen.add_argument("--port", type=int, default=5000, help="TCP listen port")
+    p_listen.add_argument(
+        "--video-backend",
+        choices=(VIDEO_BACKEND_EXTERNAL_FFPLAY, VIDEO_BACKEND_JPEG_TCP),
+        default=VIDEO_BACKEND_DEFAULT,
+        help="Видео backend: external_ffplay (по умолчанию, H.264 over TCP через ffplay) "
+             "или jpeg_tcp (legacy: 4-byte length + JPEG).",
+    )
     p_listen.add_argument(
         "--discover-port",
         type=int,
@@ -1994,7 +2396,12 @@ def main() -> None:
     p_listen.add_argument(
         "--window",
         default="Pi camera",
-        help="OpenCV window title",
+        help="Заголовок окна ffplay/OpenCV (legacy)",
+    )
+    p_listen.add_argument(
+        "--ffplay-path",
+        default=None,
+        help="Путь к ffplay.exe или к папке bin. Если не задан, используются FFPLAY_PATH, PATH и типичные Windows-пути.",
     )
     p_listen.add_argument(
         "--romeo-control-port",
@@ -2108,6 +2515,13 @@ def main() -> None:
         default=None,
         help="Pi IP or hostname (если не указан — будет UDP discovery)",
     )
+    p_conn.add_argument(
+        "--video-backend",
+        choices=(VIDEO_BACKEND_EXTERNAL_FFPLAY, VIDEO_BACKEND_JPEG_TCP),
+        default=VIDEO_BACKEND_DEFAULT,
+        help="Видео backend: external_ffplay (по умолчанию, H.264 over TCP через ffplay) "
+             "или jpeg_tcp (legacy: 4-byte length + JPEG).",
+    )
     p_conn.add_argument("--port", type=int, default=5000, help="TCP port видео (0 = взять из discovery)")
     p_conn.add_argument(
         "--connect-timeout",
@@ -2131,6 +2545,11 @@ def main() -> None:
         type=float,
         default=2.5,
         help="Seconds to wait for discovery hello",
+    )
+    p_conn.add_argument(
+        "--ffplay-path",
+        default=None,
+        help="Путь к ffplay.exe или к папке bin. Если не задан, используются FFPLAY_PATH, PATH и типичные Windows-пути.",
     )
     p_conn.add_argument(
         "--romeo-control-port",
@@ -2251,7 +2670,7 @@ def main() -> None:
         default=None,
         help="Опционально: поле ch в JSON adc_read",
     )
-    p_conn.add_argument("--window", default="Pi camera")
+    p_conn.add_argument("--window", default="Pi camera", help="Заголовок окна ffplay/OpenCV (legacy)")
 
     args = parser.parse_args()
     level = logging.DEBUG if args.verbose else getattr(logging, args.log_level)
@@ -2264,6 +2683,8 @@ def main() -> None:
             args.port,
             disc,
             args.discover_token,
+            args.video_backend,
+            args.ffplay_path,
             args.window,
             args.romeo_control_port,
             args.romeo_connect_timeout,
@@ -2288,6 +2709,8 @@ def main() -> None:
         run_connect(
             args.host,
             args.port,
+            args.video_backend,
+            args.ffplay_path,
             args.window,
             args.connect_timeout,
             args.romeo_control_port,

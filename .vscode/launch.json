@@ -1,57 +1,36 @@
 {
   "version": "0.2.0",
+
   "configurations": [
     {
-      "name": "Connect: Pi hotspot (10.42.0.1)",
-      "type": "python",
+      "name": "RUN THIS: UDP H264 + GStreamer + keyboard (10.42.0.1)",
+      "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/receive_stream.py",
+      "program": "${workspaceFolder}/examples/pc_parallel_client.py",
+      "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "justMyCode": true,
-      "args": ["connect", "--host", "10.42.0.1", "--port", "5000"]
-    },
-    {
-      "name": "Connect: Pi hotspot + Romeo debug",
-      "type": "python",
-      "request": "launch",
-      "program": "${workspaceFolder}/receive_stream.py",
-      "console": "integratedTerminal",
-      "justMyCode": true,
+      "presentation": {
+        "group": "recommended",
+        "order": 1
+      },
+      "env": {
+        "PYTHONUTF8": "1",
+        "GST_LAUNCH_PATH": "C:\\Users\\pavel\\AppData\\Local\\Programs\\gstreamer\\1.0\\msvc_x86_64\\bin\\gst-launch-1.0.exe",
+        "GST_VIDEO_SINK": "d3d11videosink"
+      },
       "args": [
-        "connect",
         "--host",
         "10.42.0.1",
-        "--port",
+        "--video-transport",
+        "udp",
+        "--video-port",
         "5000",
-        "--romeo-debug"
+        "--player",
+        "gstreamer",
+        "--control-mode",
+        "keyboard"
       ]
-    },
-    {
-      "name": "Connect: Pi home LAN (192.168.1.23)",
-      "type": "python",
-      "request": "launch",
-      "program": "${workspaceFolder}/receive_stream.py",
-      "console": "integratedTerminal",
-      "justMyCode": true,
-      "args": ["connect", "--host", "192.168.1.23", "--port", "5000"]
-    },
-    {
-      "name": "Listen (wait for Pi / fake_sender)",
-      "type": "python",
-      "request": "launch",
-      "program": "${workspaceFolder}/receive_stream.py",
-      "console": "integratedTerminal",
-      "justMyCode": true,
-      "args": ["listen", "--port", "5000"]
-    },
-    {
-      "name": "Fake Sender (local test)",
-      "type": "python",
-      "request": "launch",
-      "program": "${workspaceFolder}/fake_sender.py",
-      "console": "integratedTerminal",
-      "justMyCode": true,
-      "args": ["--host", "127.0.0.1", "--port", "5000"]
     }
   ]
 }
