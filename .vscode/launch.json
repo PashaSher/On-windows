@@ -1,36 +1,49 @@
 {
   "version": "0.2.0",
 
+  "inputs": [
+    {
+      "id": "piHost",
+      "type": "promptString",
+      "description": "IP Raspberry Pi (UDP видео :5000, Romeo :5001)",
+      "default": "10.42.0.1"
+    }
+  ],
+
   "configurations": [
     {
-      "name": "RUN THIS: UDP H264 + GStreamer + keyboard (10.42.0.1)",
+      "name": "Видео + управление (UDP + GStreamer + WASD)",
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/examples/pc_parallel_client.py",
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "justMyCode": true,
-      "presentation": {
-        "group": "recommended",
-        "order": 1
-      },
       "env": {
         "PYTHONUTF8": "1",
-        "GST_LAUNCH_PATH": "C:\\Users\\pavel\\AppData\\Local\\Programs\\gstreamer\\1.0\\msvc_x86_64\\bin\\gst-launch-1.0.exe",
+        "GST_LAUNCH_PATH": "${env:LOCALAPPDATA}\\Programs\\gstreamer\\1.0\\msvc_x86_64\\bin\\gst-launch-1.0.exe",
         "GST_VIDEO_SINK": "d3d11videosink"
       },
       "args": [
         "--host",
-        "10.42.0.1",
+        "${input:piHost}",
         "--video-transport",
         "udp",
         "--video-port",
         "5000",
+        "--control-port",
+        "5001",
         "--player",
         "gstreamer",
         "--control-mode",
         "keyboard"
       ]
+    },
+    {
+      "name": "WebRTC: webrtc-client.html в Chrome",
+      "type": "chrome",
+      "request": "launch",
+      "file": "${workspaceFolder}/webrtc-client.html"
     }
   ]
 }

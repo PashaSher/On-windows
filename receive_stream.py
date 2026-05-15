@@ -4,8 +4,8 @@
 и UDP discovery + Romeo control. Legacy-режим TCP MJPEG с префиксом длины
 оставлен как совместимость (`--video-backend jpeg_tcp`).
 
-Режим «ПК ждёт Pi» (Pi: python stream_camera.py send --host auto):
-  python receive_stream.py listen --port 5000
+Режим «ПК ждёт Pi» (legacy MJPEG; Pi: send --host auto), только `--video-backend jpeg_tcp`:
+  python receive_stream.py listen --port 5000 --video-backend jpeg_tcp
 
 Режим «подключиться к Pi» (Pi: send --listen --port 5000):
   python receive_stream.py connect --host 192.168.1.10 --port 5000
@@ -57,7 +57,7 @@ romeo-tx пишет/читает/повторяет, чтобы UI не блок
 Альтернатива: --romeo-drive-mode toggle — тап W вкл/выкл движение, тап S
 переключает направление. Удержание в этом режиме игнорируется.
 
-Башня (IJKL/стрелки) всегда работает в hold-режиме (так удобнее прицеливаться):
+Башня (IJKL/стрелки, как в играх: I вверх, K вниз, J влево, L вправо) в hold-режиме:
   smooth: при нажатии — turret_smooth dir [,v]; при отпускании — turret_stop.
   step:   при нажатии — turret dir.
 """
@@ -122,24 +122,24 @@ ROME_DRIVE_BY_CH: dict[int, dict] = {
     ord("В"): _DR,
 }
 
-# Башня: IJKL + русские буквы с тех же клавиш (ш о л д / Ш О Л Д)
+# Башня: IJKL (как в играх: J влево, L вправо) + русские буквы с тех же клавиш (ш о л д)
 ROME_TURRET_BY_CH: dict[int, str] = {
     ord("i"): "up",
     ord("I"): "up",
     ord("k"): "down",
     ord("K"): "down",
-    ord("j"): "right",
-    ord("J"): "right",
-    ord("l"): "left",
-    ord("L"): "left",
+    ord("j"): "left",
+    ord("J"): "left",
+    ord("l"): "right",
+    ord("L"): "right",
     ord("ш"): "up",
     ord("Ш"): "up",
-    ord("о"): "right",
-    ord("О"): "right",
+    ord("о"): "left",
+    ord("О"): "left",
     ord("л"): "down",
     ord("Л"): "down",
-    ord("д"): "left",
-    ord("Д"): "left",
+    ord("д"): "right",
+    ord("Д"): "right",
 }
 
 DISCOVERY_PORT_DEFAULT = 37020
@@ -320,9 +320,9 @@ def _read_input_state_win(window_hwnd: int | None, *, require_focus: bool = True
     elif _key_down_win(_VK_K) or _key_down_win(_VK_DOWN):
         turret_dir = "down"
     elif _key_down_win(_VK_J) or _key_down_win(_VK_LEFT):
-        turret_dir = "right"
-    elif _key_down_win(_VK_L) or _key_down_win(_VK_RIGHT):
         turret_dir = "left"
+    elif _key_down_win(_VK_L) or _key_down_win(_VK_RIGHT):
+        turret_dir = "right"
 
     return {
         "focus": True,

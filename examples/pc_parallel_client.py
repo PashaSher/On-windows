@@ -825,7 +825,7 @@ def keyboard_control_loop(
     }
     if not quiet:
         print(
-            "[control] Win32 keyboard active: WASD drive, IJKL/стрелки turret, Space stop, H home, M save, "
+            "[control] Win32 keyboard active: WASD drive, IJKL/стрелки башня (I↑ K↓ J← L→), Space stop, H home, M save, "
             "1..8 presets, +/- zoom, 0 reset, P status, Q/Esc exit.",
             flush=True,
         )

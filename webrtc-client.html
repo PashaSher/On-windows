@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Romeo WebRTC Operator</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #1a1a2e;
+            color: #e0e0e0;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        header {
+            background: #16213e;
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #0f3460;
+        }
+        header h1 {
+            font-size: 1.2rem;
+            color: #4fc3f7;
+        }
+        #status {
+            font-size: 0.85rem;
+            padding: 4px 12px;
+            border-radius: 12px;
+            background: #333;
+        }
+        #status.connected { background: #1b5e20; color: #a5d6a7; }
+        #status.connecting { background: #e65100; color: #ffcc80; }
+        #status.error { background: #b71c1c; color: #ef9a9a; }
+
+        .main {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+        .video-container {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+            position: relative;
+        }
+        #remoteVideo {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            min-width: 320px;
+            min-height: 240px;
+            background: #111;
+        }
+        .video-overlay {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            font-size: 0.75rem;
+            color: #4fc3f7;
+            background: rgba(0,0,0,0.6);
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .sidebar {
+            width: 320px;
+            background: #16213e;
+            border-left: 1px solid #0f3460;
+            display: flex;
+            flex-direction: column;
+            padding: 16px;
+            gap: 12px;
+            overflow-y: auto;
+        }
+        .sidebar h3 {
+            color: #4fc3f7;
+            font-size: 0.9rem;
+            margin-bottom: 4px;
+        }
+        .btn {
+            padding: 10px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        .btn-primary {
+            background: #1976d2;
+            color: #fff;
+        }
+        .btn-primary:hover { background: #1565c0; }
+        .btn-danger {
+            background: #c62828;
+            color: #fff;
+        }
+        .btn-danger:hover { background: #b71c1c; }
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .controls-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+        }
+        .controls-grid .btn {
+            padding: 14px 8px;
+            background: #0f3460;
+            color: #e0e0e0;
+            font-size: 1.1rem;
+        }
+        .controls-grid .btn:hover { background: #1a4a7a; }
+        .controls-grid .btn:active { background: #4fc3f7; color: #000; }
+
+        #log {
+            flex: 1;
+            background: #0d1b2a;
+            border-radius: 6px;
+            padding: 8px;
+            font-family: 'Cascadia Code', 'Consolas', monospace;
+            font-size: 0.75rem;
+            overflow-y: auto;
+            line-height: 1.4;
+            min-height: 120px;
+        }
+        #log .info { color: #4fc3f7; }
+        #log .error { color: #ef5350; }
+        #log .success { color: #66bb6a; }
+        #log .warn { color: #ffa726; }
+
+        .cmd-input {
+            display: flex;
+            gap: 6px;
+        }
+        .cmd-input input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #0f3460;
+            border-radius: 6px;
+            background: #0d1b2a;
+            color: #e0e0e0;
+            font-family: monospace;
+            font-size: 0.85rem;
+        }
+        .cmd-input input:focus {
+            outline: none;
+            border-color: #4fc3f7;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Romeo WebRTC Operator</h1>
+        <span id="status">Disconnected</span>
+    </header>
+
+    <div class="main">
+        <div class="video-container">
+            <video id="remoteVideo" autoplay playsinline muted></video>
+            <div class="video-overlay" id="videoInfo">No stream</div>
+        </div>
+
+        <div class="sidebar">
+            <div>
+                <h3>Connection</h3>
+                <div style="display:flex; gap:8px; margin-top:8px;">
+                    <button class="btn btn-primary" id="btnConnect" onclick="startConnection()">Connect</button>
+                    <button class="btn btn-danger" id="btnDisconnect" onclick="hangup()" disabled>Disconnect</button>
+                </div>
+            </div>
+
+            <div>
+                <h3>Drive Controls (WASD / Arrows)</h3>
+                <div class="controls-grid">
+                    <div></div>
+                    <button class="btn" onmousedown="sendCmd('forward')" onmouseup="sendCmd('stop')">&#9650; W</button>
+                    <div></div>
+                    <button class="btn" onmousedown="sendCmd('left')" onmouseup="sendCmd('stop')">&#9664; A</button>
+                    <button class="btn" onmousedown="sendCmd('stop')">&#9632;</button>
+                    <button class="btn" onmousedown="sendCmd('right')" onmouseup="sendCmd('stop')">&#9654; D</button>
+                    <div></div>
+                    <button class="btn" onmousedown="sendCmd('backward')" onmouseup="sendCmd('stop')">&#9660; S</button>
+                    <div></div>
+                </div>
+            </div>
+
+            <div>
+                <h3>Custom Command</h3>
+                <div class="cmd-input">
+                    <input type="text" id="cmdInput" placeholder='{"action":"drive","dir":"forward"}' onkeydown="if(event.key==='Enter')sendRawCmd()">
+                    <button class="btn btn-primary" onclick="sendRawCmd()">Send</button>
+                </div>
+            </div>
+
+            <div style="flex:1; display:flex; flex-direction:column;">
+                <h3>Log</h3>
+                <div id="log"></div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // ============================================================
+        // Firebase Config — replace with your bro-oppy project values
+        // ============================================================
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        import { getDatabase, ref, set, onValue, push, onChildAdded } from
+            "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+        const firebaseConfig = {
+            apiKey: "YOUR_API_KEY",
+            authDomain: "bro-oppy.firebaseapp.com",
+            databaseURL: "https://bro-oppy-default-rtdb.firebaseio.com",
+            projectId: "bro-oppy",
+            storageBucket: "bro-oppy.appspot.com",
+            messagingSenderId: "YOUR_SENDER_ID",
+            appId: "YOUR_APP_ID"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+
+        const ROOM_PATH = "rooms/pi-camera";
+
+        const STUN_SERVERS = [
+            { urls: "stun:stun.l.google.com:19302" },
+            { urls: "stun:stun1.l.google.com:19302" }
+        ];
+
+        let pc = null;
+        let dataChannel = null;
+        let unsubscribeAnswer = null;
+        let unsubscribeCalleeIce = null;
+        /** Pi may push callee ICE before we apply answer — WebRTC requires remoteDescription first */
+        let pendingCalleeCandidates = [];
+        let videoInfoTimer = null;
+        let statsTimer = null;
+        /** Чтобы один раз объяснить в логе про low-latency hint */
+        let lowLatencyHintLogged = false;
+
+        function applyLowLatencyVideoHints() {
+            if (!pc) {
+                return;
+            }
+            let applied = false;
+            for (const r of pc.getReceivers()) {
+                if (!r.track || r.track.kind !== "video") {
+                    continue;
+                }
+                try {
+                    if ("playoutDelayHint" in r) {
+                        r.playoutDelayHint = 0;
+                        applied = true;
+                    }
+                } catch (_) {}
+                try {
+                    if ("jitterBufferTarget" in r) {
+                        r.jitterBufferTarget = 0;
+                        applied = true;
+                    }
+                } catch (_) {}
+            }
+            if (applied && !lowLatencyHintLogged) {
+                lowLatencyHintLogged = true;
+                log(
+                    "Браузер: playoutDelayHint/jitterBufferTarget → 0 (меньше джиттер-буфер, цель — ближе к «живому» видео). ~1 с обычно даёт энкодер/буферы на Pi.",
+                    "info",
+                );
+            }
+        }
+
+        function stopStatsTimer() {
+            if (statsTimer !== null) {
+                clearInterval(statsTimer);
+                statsTimer = null;
+            }
+        }
+
+        function preferH264Receive(transceiver) {
+            try {
+                if (typeof RTCRtpReceiver.getCapabilities !== "function") {
+                    log("RTCRtpReceiver.getCapabilities нет — кодеки по умолчанию", "warn");
+                    return;
+                }
+                const caps = RTCRtpReceiver.getCapabilities("video");
+                if (!caps || !caps.codecs || caps.codecs.length === 0) {
+                    return;
+                }
+                const h264 = caps.codecs.filter((c) => c.mimeType.toLowerCase() === "video/h264");
+                const other = caps.codecs.filter((c) => c.mimeType.toLowerCase() !== "video/h264");
+                if (h264.length === 0) {
+                    log("Браузер не принимает H.264 — проверьте Chrome/Edge, не Firefox-only VP8", "warn");
+                    return;
+                }
+                transceiver.setCodecPreferences([...h264, ...other]);
+                log("В SDP приём видео: сначала H.264 (" + h264.length + " варианта)", "success");
+            } catch (e) {
+                log("setCodecPreferences: " + (e && e.message ? e.message : String(e)), "warn");
+            }
+        }
+
+        /** Romeo TCP JSON: {"action":"drive","dir":"forward|back|left|right|stop"} — не "type", назад — "back" */
+        function romeoDriveJson(dirUi) {
+            const dir =
+                dirUi === "backward" ? "back" : dirUi === "back" ? "back" : dirUi;
+            return JSON.stringify({ action: "drive", dir });
+        }
+
+        function startWebrtcStats() {
+            stopStatsTimer();
+            let statsTick = 0;
+            statsTimer = setInterval(async () => {
+                if (!pc) {
+                    return;
+                }
+                try {
+                    statsTick += 1;
+                    const stats = await pc.getStats();
+                    let inbound = null;
+                    stats.forEach((r) => {
+                        if (r.type === "inbound-rtp" && r.kind === "video") {
+                            inbound = r;
+                        }
+                    });
+                    const vReceivers = pc.getReceivers().filter((x) => x.track && x.track.kind === "video");
+                    if (vReceivers.length === 0) {
+                        log("Нет video receiver — в answer нет видео m-line?", "warn");
+                    }
+                    if (inbound && inbound.packetsReceived > 0) {
+                        const fd = inbound.framesDecoded;
+                        log(
+                            `RTP video: packets=${inbound.packetsReceived} bytes=${inbound.bytesReceived} ` +
+                                `framesDecoded=${fd ?? "n/a"} keyFrames=${inbound.keyFramesDecoded ?? "n/a"}`,
+                            "info",
+                        );
+                        if (fd === 0 && (inbound.bytesReceived || 0) > 5000) {
+                            log(
+                                "Пакеты идут, decode=0 — на Pi смените H.264 на Constrained Baseline (profile-level-id 42e01f) или совместимый с Chrome",
+                                "warn",
+                            );
+                        }
+                    } else {
+                        log("RTP video: 0 пакетов с Pi (трек есть, медиа по RTP не приходит)", "warn");
+                        if (statsTick === 1 || statsTick % 4 === 0) {
+                            const tr = [];
+                            stats.forEach((r) => {
+                                if (r.type === "transport") {
+                                    tr.push(
+                                        `rx=${r.bytesReceived ?? 0} tx=${r.bytesSent ?? 0} dtls=${r.dtlsState ?? "?"}`,
+                                    );
+                                }
+                            });
+                            let succeededPairs = 0;
+                            stats.forEach((r) => {
+                                if (r.type === "candidate-pair" && r.state === "succeeded") {
+                                    succeededPairs += 1;
+                                }
+                            });
+                            log(`Транспорт WebRTC: ${tr.join("; ") || "нет отчёта"} | ICE пар succeeded=${succeededPairs}`, "info");
+                            if (tr.length && tr.some((s) => /rx=[1-9]/.test(s))) {
+                                log(
+                                    "На транспорте есть rx-байты, но video RTP=0 — почти наверняка Pi не подключил камеру к WebRTC sender (после answer нужен реальный send RTP). Проверьте пайплайн на Pi.",
+                                    "error",
+                                );
+                            } else {
+                                log(
+                                    "Если rx≈0 — смотрите файрвол/NAT или добавьте TURN; если rx>0 только от data channel — всё равно чинить отправку видео на Pi.",
+                                    "info",
+                                );
+                            }
+                        }
+                    }
+                } catch (e) {
+                    log("getStats: " + (e && e.message ? e.message : String(e)), "error");
+                }
+            }, 4000);
+        }
+
+        function wireControlChannel(ch) {
+            dataChannel = ch;
+            ch.onopen = () => {
+                log(`Control channel open (label=${ch.label})`, "success");
+            };
+            ch.onclose = () => log(`Control channel closed (${ch.label})`, "warn");
+            ch.onerror = (e) => log("Control channel error: " + (e && e.message ? e.message : String(e)), "error");
+            ch.onmessage = (e) => log(`Pi: ${e.data}`, "info");
+        }
+
+        function teardownFirebaseListeners() {
+            if (typeof unsubscribeAnswer === "function") {
+                unsubscribeAnswer();
+                unsubscribeAnswer = null;
+            }
+            if (typeof unsubscribeCalleeIce === "function") {
+                unsubscribeCalleeIce();
+                unsubscribeCalleeIce = null;
+            }
+        }
+
+        async function flushPendingCalleeIce() {
+            if (!pc || !pc.remoteDescription) {
+                return;
+            }
+            while (pendingCalleeCandidates.length > 0) {
+                const candidate = pendingCalleeCandidates.shift();
+                try {
+                    await pc.addIceCandidate(candidate);
+                    log("(flush) Pi ICE added", "info");
+                } catch (e) {
+                    log("addIceCandidate (flush): " + (e && e.message ? e.message : String(e)), "error");
+                }
+            }
+        }
+
+        async function addCalleeIceCandidate(candidate) {
+            if (!pc) {
+                return;
+            }
+            if (!pc.remoteDescription) {
+                pendingCalleeCandidates.push(candidate);
+                log("Pi ICE queued (remote description not set yet)", "warn");
+                return;
+            }
+            try {
+                await pc.addIceCandidate(candidate);
+                log("Pi ICE candidate applied", "info");
+            } catch (e) {
+                log("addIceCandidate: " + (e && e.message ? e.message : String(e)), "error");
+            }
+        }
+
+        function stopVideoInfoTimer() {
+            if (videoInfoTimer !== null) {
+                clearInterval(videoInfoTimer);
+                videoInfoTimer = null;
+            }
+        }
+
+        function startVideoOverlayUpdates() {
+            const video = document.getElementById("remoteVideo");
+            const info = document.getElementById("videoInfo");
+            stopVideoInfoTimer();
+            videoInfoTimer = setInterval(() => {
+                if (video.videoWidth > 0) {
+                    info.textContent = `${video.videoWidth}x${video.videoHeight} | ${Math.round(video.currentTime)}s`;
+                } else if (video.srcObject && video.srcObject.getVideoTracks().length) {
+                    const t = video.srcObject.getVideoTracks()[0];
+                    const st = t.readyState;
+                    const en = t.enabled && !t.muted;
+                    info.textContent = `No decoded frames yet (${st}${en ? "" : ", muted?"})`;
+                } else {
+                    info.textContent = "No stream";
+                }
+            }, 500);
+        }
+
+        function attachVideoDebugListeners(video) {
+            video.onloadedmetadata = () => {
+                log(`Video metadata: ${video.videoWidth}x${video.videoHeight}`, "success");
+                document.getElementById("videoInfo").textContent =
+                    video.videoWidth ? `${video.videoWidth}x${video.videoHeight}` : "Metadata (0×0?)";
+            };
+            video.onplaying = () => log("Video element playing", "success");
+            video.onwaiting = () => log("Video waiting (buffering)", "warn");
+            video.onstalled = () => log("Video stalled", "warn");
+            video.onerror = () => log("Video element error", "error");
+        }
+
+        // Expose functions to global scope for inline handlers
+        window.startConnection = startConnection;
+        window.hangup = hangup;
+        window.sendCmd = sendCmd;
+        window.sendRawCmd = sendRawCmd;
+
+        // ============================================================
+        // Logging
+        // ============================================================
+        function log(msg, level = "info") {
+            const el = document.getElementById("log");
+            const time = new Date().toLocaleTimeString();
+            el.innerHTML += `<div class="${level}">[${time}] ${msg}</div>`;
+            el.scrollTop = el.scrollHeight;
+        }
+
+        function setStatus(text, cls) {
+            const el = document.getElementById("status");
+            el.textContent = text;
+            el.className = cls || "";
+        }
+
+        // ============================================================
+        // WebRTC Connection
+        // ============================================================
+        async function startConnection() {
+            lowLatencyHintLogged = false;
+            log("Starting WebRTC connection...");
+            setStatus("Connecting...", "connecting");
+            document.getElementById("btnConnect").disabled = true;
+            document.getElementById("btnDisconnect").disabled = false;
+            stopVideoInfoTimer();
+            const videoEl = document.getElementById("remoteVideo");
+            document.getElementById("videoInfo").textContent = "Connecting…";
+            attachVideoDebugListeners(videoEl);
+
+            teardownFirebaseListeners();
+            pendingCalleeCandidates = [];
+            if (dataChannel) {
+                try {
+                    dataChannel.close();
+                } catch (_) {}
+                dataChannel = null;
+            }
+            if (pc) {
+                try {
+                    pc.close();
+                } catch (_) {}
+                pc = null;
+            }
+
+            // Clean signaling room for a fresh offer/answer cycle
+            await set(ref(db, `${ROOM_PATH}/offer`), null);
+            await set(ref(db, `${ROOM_PATH}/callerCandidates`), null);
+            await set(ref(db, `${ROOM_PATH}/answer`), null);
+            await set(ref(db, `${ROOM_PATH}/calleeCandidates`), null);
+
+            pc = new RTCPeerConnection({
+                iceServers: STUN_SERVERS,
+                iceCandidatePoolSize: 10,
+            });
+
+            const outboundDc = pc.createDataChannel("control", { ordered: true });
+            wireControlChannel(outboundDc);
+
+            pc.ondatachannel = (ev) => {
+                log(`Remote DataChannel (от Pi): label="${ev.channel.label}"`, "success");
+                try {
+                    if (dataChannel && dataChannel !== ev.channel) {
+                        dataChannel.close();
+                    }
+                } catch (_) {}
+                wireControlChannel(ev.channel);
+            };
+
+            // Handle incoming media tracks (H.264 video from Pi)
+            pc.ontrack = async (event) => {
+                const track = event.track;
+                log("Received remote track: " + track.kind + ", id=" + track.id, "success");
+                if (track.kind === "video") {
+                    log(
+                        "Video codec hint: check Pi sends H.264 baseline/profile browsers can decode (not HEVC-only)",
+                        "info",
+                    );
+                    queueMicrotask(() => applyLowLatencyVideoHints());
+                }
+                track.enabled = true;
+                track.onmute = () => log("Remote track muted", "warn");
+                track.onunmute = () => log("Remote track unmuted", "success");
+                track.onended = () => log("Remote track ended", "error");
+
+                const video = document.getElementById("remoteVideo");
+                const stream =
+                    event.streams && event.streams[0]
+                        ? event.streams[0]
+                        : new MediaStream([track]);
+                video.srcObject = stream;
+                document.getElementById("videoInfo").textContent = "Track attached, starting playback…";
+                startVideoOverlayUpdates();
+                if (typeof video.requestVideoFrameCallback === "function") {
+                    video.requestVideoFrameCallback(() =>
+                        log("Отрисован кадр в <video> (requestVideoFrameCallback)", "success"),
+                    );
+                }
+                try {
+                    await video.play();
+                    log("video.play() OK", "success");
+                } catch (e) {
+                    log("video.play() failed: " + (e && e.message ? e.message : String(e)), "error");
+                }
+            };
+
+            // Приём только видео; в SDP сначала H.264 (иначе Pi часто договаривается о VP8 и шлёт H264 — чёрный экран)
+            const videoTransceiver = pc.addTransceiver("video", { direction: "recvonly" });
+            preferH264Receive(videoTransceiver);
+
+            // ICE candidate handling — write our candidates to Firebase
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    const candidatesRef = ref(db, `${ROOM_PATH}/callerCandidates`);
+                    push(candidatesRef, event.candidate.toJSON());
+                    log("Sent ICE candidate", "info");
+                }
+            };
+
+            pc.oniceconnectionstatechange = () => {
+                log(`ICE state: ${pc.iceConnectionState}`);
+                if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") {
+                    setStatus("Connected", "connected");
+                    log("WebRTC connected!", "success");
+                    applyLowLatencyVideoHints();
+                    startWebrtcStats();
+                } else if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
+                    setStatus("Disconnected", "error");
+                    log("Connection lost", "error");
+                    stopStatsTimer();
+                }
+            };
+
+            pc.onconnectionstatechange = () => {
+                log(`Peer connection state: ${pc.connectionState}`);
+                if (pc.connectionState === "failed") {
+                    setStatus("Failed", "error");
+                    log("PC failed — проверьте сеть, Firebase и что Pi отвечает answer+callee ICE", "error");
+                }
+            };
+
+            // Create and set local SDP offer
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            log("Created SDP offer");
+
+            // Write offer to Firebase
+            await set(ref(db, `${ROOM_PATH}/offer`), {
+                type: offer.type,
+                sdp: offer.sdp
+            });
+            log("Offer written to Firebase");
+
+            // Listen for SDP answer from Pi
+            const answerRef = ref(db, `${ROOM_PATH}/answer`);
+            unsubscribeAnswer = onValue(answerRef, (snapshot) => {
+                void (async () => {
+                    const data = snapshot.val();
+                    if (!data || !pc || pc.currentRemoteDescription) {
+                        return;
+                    }
+                    try {
+                        log("Received SDP answer from Pi", "success");
+                        const answer = new RTCSessionDescription(data);
+                        await pc.setRemoteDescription(answer);
+                        log("Remote description set", "success");
+                        await flushPendingCalleeIce();
+                        try {
+                            for (const r of pc.getReceivers()) {
+                                if (r.track && r.track.kind === "video") {
+                                    const codecs = (r.getParameters().codecs || []).map((c) =>
+                                        c.mimeType + (c.sdpFmtpLine ? " (" + c.sdpFmtpLine.slice(0, 48) + ")" : ""),
+                                    );
+                                    if (codecs.length) {
+                                        log("Согласованное видео (приём): " + codecs.join(" | "), "info");
+                                    }
+                                }
+                            }
+                        } catch (_) {}
+                        applyLowLatencyVideoHints();
+                        queueMicrotask(() => applyLowLatencyVideoHints());
+                    } catch (e) {
+                        log("setRemoteDescription: " + (e && e.message ? e.message : String(e)), "error");
+                        setStatus("SDP error", "error");
+                    }
+                })();
+            });
+
+            // ICE from Pi (must not call addIceCandidate before remote answer is applied — see queue above)
+            const calleeCandidatesRef = ref(db, `${ROOM_PATH}/calleeCandidates`);
+            unsubscribeCalleeIce = onChildAdded(calleeCandidatesRef, (snapshot) => {
+                const raw = snapshot.val();
+                if (!raw) {
+                    return;
+                }
+                void addCalleeIceCandidate(new RTCIceCandidate(raw));
+            });
+        }
+
+        // ============================================================
+        // Hangup
+        // ============================================================
+        async function hangup() {
+            log("Disconnecting...", "warn");
+            stopVideoInfoTimer();
+            stopStatsTimer();
+            teardownFirebaseListeners();
+            pendingCalleeCandidates = [];
+            lowLatencyHintLogged = false;
+
+            if (dataChannel) {
+                dataChannel.close();
+                dataChannel = null;
+            }
+            if (pc) {
+                pc.close();
+                pc = null;
+            }
+
+            document.getElementById("remoteVideo").srcObject = null;
+            document.getElementById("videoInfo").textContent = "No stream";
+
+            // Clean only caller-side data on hangup
+            await set(ref(db, `${ROOM_PATH}/offer`), null);
+            await set(ref(db, `${ROOM_PATH}/callerCandidates`), null);
+
+            setStatus("Disconnected", "");
+            document.getElementById("btnConnect").disabled = false;
+            document.getElementById("btnDisconnect").disabled = true;
+            log("Disconnected");
+        }
+
+        // ============================================================
+        // Commands via Data Channel
+        // ============================================================
+        function sendCmd(direction) {
+            const cmd = romeoDriveJson(direction);
+            if (dataChannel && dataChannel.readyState === "open") {
+                dataChannel.send(cmd);
+                log(`Sent: ${cmd}`);
+            } else {
+                log("Control channel not open (ждите onopen или проверьте Pi сторону)", "error");
+            }
+        }
+
+        function sendRawCmd() {
+            const input = document.getElementById("cmdInput");
+            const cmd = input.value.trim();
+            if (!cmd) return;
+            if (dataChannel && dataChannel.readyState === "open") {
+                dataChannel.send(cmd);
+                log(`Sent raw: ${cmd}`);
+                input.value = "";
+            } else {
+                log("Data channel not open", "error");
+            }
+        }
+
+        // ============================================================
+        // Keyboard controls
+        // ============================================================
+        const keyMap = {
+            "KeyW": "forward", "ArrowUp": "forward",
+            "KeyS": "backward", "ArrowDown": "backward",
+            "KeyA": "left", "ArrowLeft": "left",
+            "KeyD": "right", "ArrowRight": "right"
+        };
+        const activeKeys = new Set();
+
+        document.addEventListener("keydown", (e) => {
+            if (e.target.tagName === "INPUT") return;
+            const dir = keyMap[e.code];
+            if (dir && !activeKeys.has(e.code)) {
+                activeKeys.add(e.code);
+                sendCmd(dir);
+            }
+        });
+
+        document.addEventListener("keyup", (e) => {
+            if (e.target.tagName === "INPUT") return;
+            const dir = keyMap[e.code];
+            if (dir && activeKeys.has(e.code)) {
+                activeKeys.delete(e.code);
+                if (activeKeys.size === 0) {
+                    sendCmd("stop");
+                }
+            }
+        });
+
+        log(`Firebase room: ${ROOM_PATH}`, "info");
+        log("Ready. Click Connect to start.", "success");
+    </script>
+</body>
+</html>
