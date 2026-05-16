@@ -1,0 +1,17 @@
+[Unit]
+Description=ICE WebRTC config API (GET /api/ice)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Секреты только для root; при смене User= дайте чтение unit-ю или используйте drop-in.
+EnvironmentFile=-/etc/default/ice-config-server
+WorkingDirectory=/root/project
+# Замените оба пути /root/project на каталог с клоном репозитория перед установкой unit.
+ExecStart=/bin/bash -lc 'exec /usr/bin/python3 "/root/project/cloud/ice_config_server.py" --host "${ICE_CONFIG_HOST:-0.0.0.0}" --port "${ICE_CONFIG_PORT:-8788}"'
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

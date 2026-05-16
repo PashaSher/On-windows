@@ -1,0 +1,14 @@
+# Пример для /etc/default/ice-config-server (systemd) или для cloud/ice-config-server.env (ручной запуск).
+# Копия на сервере: sudo cp .../ice-config-server.example /etc/default/ice-config-server && sudo chmod 600 /etc/default/ice-config-server
+#
+# Формат: KEY=value без export (подходит и для systemd EnvironmentFile).
+
+TURN_URLS=turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp
+TURN_USERNAME=romeo
+TURN_PASSWORD=change-me
+
+# Опционально: тогда в URL ice добавьте ?token=... или Authorization: Bearer
+# ICE_CONFIG_TOKEN=
+
+ICE_CONFIG_HOST=0.0.0.0
+ICE_CONFIG_PORT=8788

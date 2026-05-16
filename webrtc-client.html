@@ -179,7 +179,30 @@
             </div>
 
             <div>
-                <h3>Drive Controls (WASD / Arrows)</h3>
+                <h3>Room &amp; ICE (cloud)</h3>
+                <p style="font-size:0.72rem;color:#888;margin:6px 0;">Канал через VPS: STUN/TURN с <code>116.203.148.254:8788/api/ice</code> (coturn на том же сервере). Токен — с VPS <code>show-ice-client-env.sh</code>; на Windows: <code>config\webrtc.ice.local.env</code> + <code>scripts\open_webrtc_operator.ps1</code>.</p>
+                <label style="font-size:0.72rem;color:#aaa;display:block;margin-top:6px;">Firebase room (id или полный путь)</label>
+                <input type="text" id="inputRoomId" value="pi-camera" placeholder="robot-ABC или rooms/robot-ABC"
+                    style="width:100%;box-sizing:border-box;padding:8px 10px;margin:4px 0 8px;border:1px solid #0f3460;border-radius:6px;background:#0d1b2a;color:#e0e0e0;font-size:0.82rem;">
+                <label style="font-size:0.72rem;color:#aaa;display:block;">ICE config URL (опционально)</label>
+                <input type="text" id="inputIceUrl" value="http://116.203.148.254:8788/api/ice" placeholder="http://116.203.148.254:8788/api/ice"
+                    style="width:100%;box-sizing:border-box;padding:8px 10px;margin:4px 0 8px;border:1px solid #0f3460;border-radius:6px;background:#0d1b2a;color:#e0e0e0;font-size:0.82rem;">
+                <label style="font-size:0.72rem;color:#ffa726;display:block;font-weight:600;">ICE token (обязательно — иначе 401, без TURN)</label>
+                <input type="text" id="inputIceToken" placeholder="вставьте ICE_CONFIG_TOKEN с VPS"
+                    autocomplete="off" spellcheck="false"
+                    style="width:100%;box-sizing:border-box;padding:8px 10px;margin:4px 0 4px;border:2px solid #e65100;border-radius:6px;background:#0d1b2a;color:#ffe0b2;font-size:0.82rem;font-family:Consolas,monospace;">
+                <p id="iceTokenHint" style="font-size:0.68rem;color:#888;margin:0 0 8px;line-height:1.35;">
+                    1) VPS: <code>sudo …/show-ice-client-env.sh</code><br>
+                    2) Скопируйте token → вставьте сюда → <b>Save in this browser</b><br>
+                    3) <b>Test ICE (VPS)</b> — в логе должны быть строки <code>turn:</code>
+                </p>
+                <button type="button" class="btn" style="width:100%;margin-top:4px;background:#0f3460;color:#e0e0e0;" id="btnSaveWebrtc" onclick="saveWebrtcSettings()">Save in this browser</button>
+                <button type="button" class="btn" style="width:100%;margin-top:6px;background:#2e7d32;color:#fff;" id="btnTestIce" onclick="testIceConfig()">Test ICE (VPS)</button>
+                <p style="font-size:0.68rem;color:#666;margin-top:8px;">Ссылка гостю: этот же файл + <code>?room=...</code> и при необходимости <code>&amp;ice=...</code> / <code>&amp;iceToken=...</code> (один Firebase-проект).</p>
+            </div>
+
+            <div>
+                <h3>Drive WASD · Turret arrows / IJKL</h3>
                 <div class="controls-grid">
                     <div></div>
                     <button class="btn" onmousedown="sendCmd('forward')" onmouseup="sendCmd('stop')">&#9650; W</button>
@@ -208,15 +231,82 @@
         </div>
     </div>
 
+    <script>
+        (function () {
+            const DEFAULT_ICE = "http://116.203.148.254:8788/api/ice";
+            function bootLog(msg, level) {
+                const el = document.getElementById("log");
+                if (!el) return;
+                const time = new Date().toLocaleTimeString();
+                el.innerHTML += "<div class=\"" + (level || "error") + "\">[" + time + "] " + msg + "</" + "div>";
+                el.scrollTop = el.scrollHeight;
+            }
+            function applyDefaultFields() {
+                const qs = new URLSearchParams(window.location.search);
+                const r = document.getElementById("inputRoomId");
+                const ice = document.getElementById("inputIceUrl");
+                const tok = document.getElementById("inputIceToken");
+                if (r && !r.value.trim()) {
+                    r.value = qs.get("room") || qs.get("r") || localStorage.getItem("webrtc_room") || "pi-camera";
+                }
+                if (ice && !ice.value.trim()) {
+                    ice.value = qs.get("ice") || qs.get("iceUrl") || localStorage.getItem("webrtc_ice_url") || DEFAULT_ICE;
+                }
+                if (tok && !tok.value.trim()) {
+                    tok.value = qs.get("iceToken") || localStorage.getItem("webrtc_ice_token") || "";
+                }
+            }
+            document.addEventListener("DOMContentLoaded", applyDefaultFields);
+            window.addEventListener("error", (e) => {
+                bootLog("JS: " + (e.message || "error") + " — откройте страницу из папки с webrtc-client.html или через open_webrtc_operator.ps1", "error");
+            });
+            window.addEventListener("unhandledrejection", (e) => {
+                const r = e.reason;
+                const detail = r && r.stack ? r.stack : r && r.message ? r.message : String(r);
+                bootLog("Promise: " + detail, "error");
+                bootLog(
+                    "Часто: file:// или F5 с ? в пути. Запуск: scripts\\serve_webrtc_operator.ps1 или Run → WebRTC (http localhost)",
+                    "warn",
+                );
+            });
+            window.__webrtcMarkReady = function () {
+                window.__webrtcAppReady = true;
+            };
+            ["startConnection", "testIceConfig", "hangup", "saveWebrtcSettings"].forEach((name) => {
+                window[name] = function () {
+                    bootLog("Модуль ещё не загружен — подождите или F12 → Console", "error");
+                    bootLog(
+                        "Debug: Run → «WebRTC: только Hetzner» или: scripts\\serve_webrtc_operator.ps1 -Profile hetzner-relay-only",
+                        "warn",
+                    );
+                };
+            });
+        })();
+    </script>
+    <script src="webrtc.firebase.local.js" defer onerror="void 0"></script>
     <script type="module">
         // ============================================================
         // Firebase Config — replace with your bro-oppy project values
         // ============================================================
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-        import { getDatabase, ref, set, onValue, push, onChildAdded } from
-            "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+        import { getDatabase } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+        import { ref, set, onValue } from "./examples/webrtc_firebase_rtdb.js";
+        import {
+            createVpsOnlyPeerConnection,
+            createOperatorPeerConnection,
+            loadVpsIceServers,
+            filterSdpIceRelayOnly,
+        } from "./examples/webrtc_operator_vps_only.js";
+        import { attachFirebaseIceTrickle } from "./examples/webrtc_firebase_ice_trickle.js";
+        import { watchPiHostRelaunch } from "./examples/webrtc_firebase_host_launch.js";
+        import {
+            attachBrowserControlKeys,
+            romeoDriveJson,
+            romeoTurretSmoothJson,
+            romeoTurretStopJson,
+        } from "./examples/webrtc_browser_control_keys.js";
 
-        const firebaseConfig = {
+        const firebaseConfig = window.WEBRTC_FIREBASE_CONFIG || {
             apiKey: "YOUR_API_KEY",
             authDomain: "bro-oppy.firebaseapp.com",
             databaseURL: "https://bro-oppy-default-rtdb.firebaseio.com",
@@ -225,25 +315,273 @@
             messagingSenderId: "YOUR_SENDER_ID",
             appId: "YOUR_APP_ID"
         };
+        if (!window.WEBRTC_FIREBASE_CONFIG) {
+            console.warn("webrtc.firebase.local.js not loaded — copy config/webrtc.firebase.local.js.example");
+        }
 
-        const app = initializeApp(firebaseConfig);
-        const db = getDatabase(app);
+        let app;
+        let db;
+        try {
+            app = initializeApp(firebaseConfig);
+            db = getDatabase(app);
+        } catch (e) {
+            console.error("Firebase init failed", e);
+        }
 
-        const ROOM_PATH = "rooms/pi-camera";
+        /** ICE config API на VPS (`cloud/ice_config_server.py`). Перекрывается ?ice= / localStorage.
+         * Если страница открыта по https://, браузер может заблокировать fetch на http:// — тогда HTTPS-прокси или ?ice=https://... */
+        const DEFAULT_ICE_CONFIG_URL = "http://116.203.148.254:8788/api/ice";
+        const HETZNER_ICE_HOST = "116.203.148.254";
+        const OPERATOR_PROFILE = (
+            new URLSearchParams(window.location.search).get("profile") ||
+            window.WEBRTC_OPERATOR_PROFILE ||
+            "default"
+        ).toLowerCase();
+        const HETZNER_RELAY_ONLY =
+            OPERATOR_PROFILE === "hetzner-relay-only" ||
+            OPERATOR_PROFILE === "hetzner" ||
+            new URLSearchParams(window.location.search).has("relayOnly");
 
-        const STUN_SERVERS = [
-            { urls: "stun:stun.l.google.com:19302" },
-            { urls: "stun:stun1.l.google.com:19302" }
-        ];
+        let lastSignalingRoomPath = null;
+
+        function applyHetznerDebugUi() {
+            if (!HETZNER_RELAY_ONLY) {
+                return;
+            }
+            document.title = "Romeo WebRTC — Hetzner relay only (debug)";
+            const h1 = document.querySelector("header h1");
+            if (h1) {
+                h1.textContent = "WebRTC — только Hetzner (debug)";
+                h1.style.color = "#ffb74d";
+            }
+            const header = document.querySelector("header");
+            if (header && !document.getElementById("hetznerDebugBanner")) {
+                const b = document.createElement("div");
+                b.id = "hetznerDebugBanner";
+                b.style.cssText =
+                    "flex:1;margin:0 16px;padding:6px 10px;font-size:0.72rem;background:#4a148c;color:#e1bee7;border-radius:6px;text-align:center;";
+                b.textContent =
+                    "iceTransportPolicy=relay · только TURN " +
+                    HETZNER_ICE_HOST +
+                    " · прямой P2P отключён";
+                header.insertBefore(b, document.getElementById("status"));
+            }
+            const iceEl = document.getElementById("inputIceUrl");
+            if (iceEl) {
+                iceEl.readOnly = true;
+                iceEl.value = DEFAULT_ICE_CONFIG_URL;
+            }
+        }
+
+        async function logNominatedIcePath() {
+            if (!pc) {
+                return;
+            }
+            try {
+                const stats = await pc.getStats();
+                const byId = new Map();
+                stats.forEach((r) => byId.set(r.id, r));
+                stats.forEach((r) => {
+                    if (r.type !== "candidate-pair" || r.state !== "succeeded" || !r.nominated) {
+                        return;
+                    }
+                    const loc = byId.get(r.localCandidateId);
+                    const rem = byId.get(r.remoteCandidateId);
+                    const lt = loc?.candidateType || "?";
+                    const rt = rem?.candidateType || "?";
+                    log(`ICE path (nominated): ${lt} → ${rt}`, lt === "relay" && rt === "relay" ? "success" : "warn");
+                    if (HETZNER_RELAY_ONLY && (lt !== "relay" || rt !== "relay")) {
+                        log("Ожидался relay↔relay через Hetzner — проверьте TURN на Pi", "error");
+                    }
+                });
+            } catch (e) {
+                log("ICE stats: " + (e && e.message ? e.message : String(e)), "warn");
+            }
+        }
+
+        function getRoomPath() {
+            let r = (document.getElementById("inputRoomId")?.value || "").trim();
+            if (!r) {
+                r = "pi-camera";
+            }
+            if (!r.includes("/")) {
+                return `rooms/${r}`;
+            }
+            return r;
+        }
+
+        function saveWebrtcSettings() {
+            try {
+                const tok = document.getElementById("inputIceToken").value.trim();
+                localStorage.setItem("webrtc_room", document.getElementById("inputRoomId").value.trim());
+                localStorage.setItem("webrtc_ice_url", document.getElementById("inputIceUrl").value.trim());
+                localStorage.setItem("webrtc_ice_token", tok);
+                ensureHostLaunchWatch();
+                if (!tok) {
+                    log("Saved, но ICE token пуст — будет 401", "warn");
+                } else {
+                    log(`Saved (token ${tok.length} chars) — нажмите Test ICE (VPS)`, "success");
+                }
+            } catch (e) {
+                log("localStorage: " + (e && e.message ? e.message : String(e)), "error");
+            }
+        }
+
+        (function initWebrtcSettingsFromUrl() {
+            const qs = new URLSearchParams(window.location.search);
+            const rEl = document.getElementById("inputRoomId");
+            const iceEl = document.getElementById("inputIceUrl");
+            const tokEl = document.getElementById("inputIceToken");
+            if (!rEl || !iceEl || !tokEl) {
+                return;
+            }
+            const rq = qs.get("room") || qs.get("r");
+            const iq = qs.get("ice") || qs.get("iceUrl");
+            const tq = qs.get("iceToken");
+            rEl.value = rq || localStorage.getItem("webrtc_room") || "pi-camera";
+            iceEl.value = iq || localStorage.getItem("webrtc_ice_url") || DEFAULT_ICE_CONFIG_URL;
+            tokEl.value = tq || localStorage.getItem("webrtc_ice_token") || "";
+            applyHetznerDebugUi();
+        })();
+
+        function logIceFetchResult({ iceServers, source, error }, iceUrl) {
+            if (source === "api") {
+                const turnish = iceServers.filter((s) => {
+                    const u = String(s.urls || "");
+                    return u.includes("turn:") || u.includes("turns:");
+                }).length;
+                if (HETZNER_RELAY_ONLY) {
+                    log(`ICE Hetzner: ${turnish} TURN (relay-only, без STUN/P2P)`, "success");
+                } else {
+                    log(`ICE (VPS): ${iceServers.length} entries, TURN-like: ${turnish}`, "success");
+                }
+            } else if (iceUrl && error === "HTTP 401") {
+                log("ICE 401: нужен token с VPS (show-ice-client-env.sh) → поле ниже → Save", "error");
+            } else if (iceUrl && error) {
+                log(
+                    HETZNER_RELAY_ONLY
+                        ? `ICE Hetzner failed: ${error} — Connect заблокирован`
+                        : `ICE (VPS) failed: ${error} — STUN only`,
+                    "warn",
+                );
+            } else if (!iceUrl) {
+                log("ICE URL пуст — только публичный STUN", "warn");
+            }
+        }
+
+        function getIceConfigFromUi() {
+            return {
+                iceUrl: (document.getElementById("inputIceUrl")?.value || "").trim(),
+                token: (document.getElementById("inputIceToken")?.value || "").trim(),
+            };
+        }
+
+        async function loadIceServers() {
+            const { iceUrl, token: tok } = getIceConfigFromUi();
+            const result = await loadVpsIceServers(iceUrl, tok, { relayOnly: HETZNER_RELAY_ONLY });
+            logIceFetchResult(result, iceUrl);
+            return result;
+        }
+
+        async function testIceConfig() {
+            const { iceUrl, token: tok } = getIceConfigFromUi();
+            log("Проверка ICE API…", "info");
+            let { iceServers, source, error } = await loadVpsIceServers(iceUrl, tok, {
+                relayOnly: HETZNER_RELAY_ONLY,
+            });
+            if (source === "api") {
+                for (const s of iceServers) {
+                    const u = Array.isArray(s.urls) ? s.urls.join(",") : String(s.urls || "");
+                    const kind = /turn/i.test(u) ? "TURN" : /stun/i.test(u) ? "STUN" : "ICE";
+                    log(`${kind}: ${u}`, "success");
+                }
+                log(
+                    HETZNER_RELAY_ONLY
+                        ? "ICE Hetzner OK (TURN) — Connect пойдёт только через relay"
+                        : "ICE OK — можно Connect (нужен Pi в той же Firebase-комнате)",
+                    "success",
+                );
+            } else if (error === "HTTP 401") {
+                log("ICE 401: поле «ICE token» пустое или неверное. VPS: show-ice-client-env.sh", "error");
+                log("Вставьте token → Save in this browser → Test ICE снова", "error");
+                setStatus("ICE token required", "error");
+                const tokEl = document.getElementById("inputIceToken");
+                if (tokEl) {
+                    tokEl.focus();
+                    tokEl.select();
+                }
+            } else {
+                log(`ICE test failed: ${error || "no URL"}`, "error");
+            }
+        }
 
         let pc = null;
         let dataChannel = null;
         let unsubscribeAnswer = null;
-        let unsubscribeCalleeIce = null;
-        /** Pi may push callee ICE before we apply answer — WebRTC requires remoteDescription first */
-        let pendingCalleeCandidates = [];
+        let detachIceTrickle = null;
+        let iceTrickleHandle = null;
+        let detachHostLaunch = null;
+        let detachControlKeys = null;
+        let connectInProgress = false;
+        let autoConnectOnNeedOffer = true;
+        /** Счётчик typ в ICE от Pi (Firebase calleeCandidates) — для Hetzner-only диагностики */
+        let piCalleeIceStats = { host: 0, srflx: 0, relay: 0, prflx: 0, other: 0 };
         let videoInfoTimer = null;
         let statsTimer = null;
+
+        function parseIceCandidateTyp(candidateStr) {
+            const m = String(candidateStr || "").match(/\btyp\s+(\w+)/i);
+            return m ? m[1].toLowerCase() : "other";
+        }
+
+        function resetPiCalleeIceStats() {
+            piCalleeIceStats = { host: 0, srflx: 0, relay: 0, prflx: 0, other: 0 };
+        }
+
+        function notePiCalleeIce(raw) {
+            const line = raw?.candidate || raw?.sdp || "";
+            const typ = parseIceCandidateTyp(line);
+            if (typ in piCalleeIceStats) {
+                piCalleeIceStats[typ] += 1;
+            } else {
+                piCalleeIceStats.other += 1;
+            }
+            return typ;
+        }
+
+        function logPiCalleeIceSummary(context) {
+            if (!HETZNER_RELAY_ONLY) {
+                return;
+            }
+            const s = piCalleeIceStats;
+            const total = s.host + s.srflx + s.relay + s.prflx + s.other;
+            log(
+                `Pi ICE (${context}): host=${s.host} srflx=${s.srflx} relay=${s.relay} prflx=${s.prflx} (всего ${total})`,
+                s.relay > 0 ? "info" : "error",
+            );
+            if (total === 0) {
+                log("С Pi не пришло callee ICE в Firebase — проверьте camstream и правила RTDB", "error");
+            } else if (s.relay === 0) {
+                log(
+                    "Hetzner-only: браузер только relay, Pi без relay → ICE не сойдётся. " +
+                        "На Pi: тот же ICE token + ice_transport_policy=relay (см. deploy/pi-webrtc-hetzner-relay.example.txt)",
+                    "error",
+                );
+            }
+        }
+
+        function logAnswerSdpIceTypes(sdp) {
+            if (!sdp || !HETZNER_RELAY_ONLY) {
+                return;
+            }
+            const host = (sdp.match(/\btyp host\b/gi) || []).length;
+            const srflx = (sdp.match(/\btyp srflx\b/gi) || []).length;
+            const relay = (sdp.match(/\btyp relay\b/gi) || []).length;
+            log(`Pi answer SDP ICE: host=${host} srflx=${srflx} relay=${relay}`, relay > 0 ? "success" : "error");
+            if (relay === 0) {
+                log("В SDP answer нет typ relay — Pi не использует TURN relay", "error");
+            }
+        }
         /** Чтобы один раз объяснить в логе про low-latency hint */
         let lowLatencyHintLogged = false;
 
@@ -308,11 +646,13 @@
             }
         }
 
-        /** Romeo TCP JSON: {"action":"drive","dir":"forward|back|left|right|stop"} — не "type", назад — "back" */
-        function romeoDriveJson(dirUi) {
-            const dir =
-                dirUi === "backward" ? "back" : dirUi === "back" ? "back" : dirUi;
-            return JSON.stringify({ action: "drive", dir });
+        function sendDc(cmd) {
+            if (dataChannel && dataChannel.readyState === "open") {
+                dataChannel.send(cmd);
+                log(`Sent: ${cmd}`);
+            } else {
+                log("Control channel not open (ждите onopen или проверьте Pi сторону)", "error");
+            }
         }
 
         function startWebrtcStats() {
@@ -400,41 +740,90 @@
                 unsubscribeAnswer();
                 unsubscribeAnswer = null;
             }
-            if (typeof unsubscribeCalleeIce === "function") {
-                unsubscribeCalleeIce();
-                unsubscribeCalleeIce = null;
+            if (typeof detachIceTrickle === "function") {
+                detachIceTrickle();
+                detachIceTrickle = null;
+                iceTrickleHandle = null;
             }
         }
 
-        async function flushPendingCalleeIce() {
-            if (!pc || !pc.remoteDescription) {
+        function ensureHostLaunchWatch() {
+            if (!db) {
                 return;
             }
-            while (pendingCalleeCandidates.length > 0) {
-                const candidate = pendingCalleeCandidates.shift();
-                try {
-                    await pc.addIceCandidate(candidate);
-                    log("(flush) Pi ICE added", "info");
-                } catch (e) {
-                    log("addIceCandidate (flush): " + (e && e.message ? e.message : String(e)), "error");
-                }
-            }
-        }
-
-        async function addCalleeIceCandidate(candidate) {
-            if (!pc) {
-                return;
-            }
-            if (!pc.remoteDescription) {
-                pendingCalleeCandidates.push(candidate);
-                log("Pi ICE queued (remote description not set yet)", "warn");
-                return;
+            if (typeof detachHostLaunch === "function") {
+                detachHostLaunch();
             }
             try {
-                await pc.addIceCandidate(candidate);
-                log("Pi ICE candidate applied", "info");
+                detachHostLaunch = watchPiHostRelaunch(
+                    db,
+                    getRoomPath(),
+                    (info) => {
+                        const id = info.hostLaunchId != null ? String(info.hostLaunchId) : "?";
+                        log(`Pi перезапустился (${info.why}, hostLaunchId=${id})`, "warn");
+                        if (pc && pc.connectionState !== "closed") {
+                            log("Disconnect → Connect заново", "warn");
+                        }
+                        scheduleAutoConnect("pi-relaunch");
+                    },
+                    {
+                        onPiWaiting: (info) => {
+                            const id = info.hostLaunchId != null ? String(info.hostLaunchId) : "?";
+                            if (info.initial) {
+                                log(`Pi ждёт offer (needOffer, hostLaunchId=${id})`, "info");
+                            } else {
+                                log(`Pi снова ждёт offer (hostLaunchId=${id})`, "info");
+                            }
+                            scheduleAutoConnect("pi-waiting");
+                        },
+                    },
+                );
             } catch (e) {
-                log("addIceCandidate: " + (e && e.message ? e.message : String(e)), "error");
+                log("watchPiHostRelaunch: " + (e && e.message ? e.message : String(e)), "warn");
+            }
+        }
+
+        function scheduleAutoConnect(reason) {
+            if (!autoConnectOnNeedOffer || connectInProgress) {
+                return;
+            }
+            const tok = (document.getElementById("inputIceToken")?.value || "").trim();
+            if (!tok) {
+                return;
+            }
+            log(`Авто-Connect (${reason}) через 1 с…`, "info");
+            setTimeout(() => {
+                if (connectInProgress) {
+                    return;
+                }
+                if (pc) {
+                    void hangup().then(() => {
+                        setTimeout(() => void startConnection(), 400);
+                    });
+                    return;
+                }
+                void startConnection();
+            }, 1000);
+        }
+
+        async function applyRemoteIceAfterAnswer() {
+            if (!iceTrickleHandle || !pc) {
+                return;
+            }
+            let n = await iceTrickleHandle.flushPending();
+            n += await iceTrickleHandle.syncRemoteFromFirebase();
+            if (n > 0) {
+                log(`Применено ${n} remote ICE (Firebase)`, "success");
+            }
+            if (pc.iceConnectionState === "checking" || pc.iceConnectionState === "new") {
+                try {
+                    if (typeof pc.restartIce === "function") {
+                        await pc.restartIce();
+                        log("ICE restart после answer + remote ICE", "info");
+                    }
+                } catch (e) {
+                    log("restartIce: " + (e && e.message ? e.message : String(e)), "warn");
+                }
             }
         }
 
@@ -480,6 +869,8 @@
         window.hangup = hangup;
         window.sendCmd = sendCmd;
         window.sendRawCmd = sendRawCmd;
+        window.saveWebrtcSettings = saveWebrtcSettings;
+        window.testIceConfig = testIceConfig;
 
         // ============================================================
         // Logging
@@ -501,6 +892,14 @@
         // WebRTC Connection
         // ============================================================
         async function startConnection() {
+            if (!db) {
+                log("Firebase DB недоступен — настройте webrtc.firebase.local.js", "error");
+                return;
+            }
+            if (connectInProgress) {
+                return;
+            }
+            connectInProgress = true;
             lowLatencyHintLogged = false;
             log("Starting WebRTC connection...");
             setStatus("Connecting...", "connecting");
@@ -512,7 +911,7 @@
             attachVideoDebugListeners(videoEl);
 
             teardownFirebaseListeners();
-            pendingCalleeCandidates = [];
+            resetPiCalleeIceStats();
             if (dataChannel) {
                 try {
                     dataChannel.close();
@@ -526,16 +925,94 @@
                 pc = null;
             }
 
-            // Clean signaling room for a fresh offer/answer cycle
-            await set(ref(db, `${ROOM_PATH}/offer`), null);
-            await set(ref(db, `${ROOM_PATH}/callerCandidates`), null);
-            await set(ref(db, `${ROOM_PATH}/answer`), null);
-            await set(ref(db, `${ROOM_PATH}/calleeCandidates`), null);
+            const roomPath = getRoomPath();
+            lastSignalingRoomPath = roomPath;
+            log(`Signaling room: ${roomPath}`, "info");
 
-            pc = new RTCPeerConnection({
-                iceServers: STUN_SERVERS,
-                iceCandidatePoolSize: 10,
+            // Clean signaling room for a fresh offer/answer cycle
+            await set(ref(db, `${roomPath}/offer`), null);
+            await set(ref(db, `${roomPath}/callerCandidates`), null);
+            await set(ref(db, `${roomPath}/answer`), null);
+            await set(ref(db, `${roomPath}/calleeCandidates`), null);
+
+            const { iceUrl, token: iceTok } = getIceConfigFromUi();
+            let iceProbe;
+            try {
+                if (HETZNER_RELAY_ONLY) {
+                    ({ pc, iceProbe } = await createVpsOnlyPeerConnection(iceUrl, iceTok));
+                } else {
+                    ({ pc, iceProbe } = await createOperatorPeerConnection(iceUrl, iceTok, {
+                        relayOnly: false,
+                    }));
+                }
+            } catch (e) {
+                log("ICE / PC: " + (e && e.message ? e.message : String(e)), "error");
+                document.getElementById("btnConnect").disabled = false;
+                document.getElementById("btnDisconnect").disabled = true;
+                setStatus("No Hetzner TURN", "error");
+                connectInProgress = false;
+                return;
+            }
+
+            if (!HETZNER_RELAY_ONLY && iceProbe.source !== "api" && iceProbe.error === "HTTP 401") {
+                log(
+                    "Без TURN на VPS прямой P2P часто обрывается через 10–30 с. Задайте token.",
+                    "error",
+                );
+                const proceed = confirm(
+                    "ICE API 401 — TURN недоступен.\n\nПодключаться только со STUN? (нестабильно)",
+                );
+                if (!proceed) {
+                    pc.close();
+                    pc = null;
+                    document.getElementById("btnConnect").disabled = false;
+                    document.getElementById("btnDisconnect").disabled = true;
+                    setStatus("Disconnected", "");
+                    connectInProgress = false;
+                    return;
+                }
+            }
+
+            log(
+                HETZNER_RELAY_ONLY
+                    ? `ICE relay-only: ${iceProbe.iceServers.length} TURN, iceTransportPolicy=relay`
+                    : `ICE entries: ${iceProbe.iceServers.length}`,
+                "info",
+            );
+
+            iceTrickleHandle = attachFirebaseIceTrickle(db, roomPath, pc, "caller", {
+                remoteRelayOnly: HETZNER_RELAY_ONLY,
+                onLocalCandidate: (c) => {
+                    if (!HETZNER_RELAY_ONLY) {
+                        return;
+                    }
+                    const typ = c.type || "?";
+                    log(
+                        `ICE local (${typ}): ${(c.candidate || "").slice(0, 72)}…`,
+                        typ === "relay" ? "info" : "warn",
+                    );
+                },
+                onRemoteCandidate: (raw, meta) => {
+                    if (meta.skipped) {
+                        log(`Pi ICE (${meta.typ}) пропущен — Hetzner-only принимает только relay`, "warn");
+                        return;
+                    }
+                    notePiCalleeIce(raw);
+                    if (HETZNER_RELAY_ONLY) {
+                        log(
+                            meta.queued
+                                ? `Pi ICE queued (${meta.typ})`
+                                : `Pi ICE (${meta.typ}) applied`,
+                            meta.typ === "relay" ? "success" : "warn",
+                        );
+                    } else if (!meta.queued) {
+                        log(`Pi ICE (${meta.typ}) applied`, "info");
+                    }
+                },
+                onError: (err) => log("addIceCandidate: " + err.message, "error"),
             });
+            detachIceTrickle = () => iceTrickleHandle.detach();
+            log("Firebase ICE trickle: caller → callerCandidates, ← calleeCandidates", "success");
 
             const outboundDc = pc.createDataChannel("control", { ordered: true });
             wireControlChannel(outboundDc);
@@ -591,25 +1068,19 @@
             const videoTransceiver = pc.addTransceiver("video", { direction: "recvonly" });
             preferH264Receive(videoTransceiver);
 
-            // ICE candidate handling — write our candidates to Firebase
-            pc.onicecandidate = (event) => {
-                if (event.candidate) {
-                    const candidatesRef = ref(db, `${ROOM_PATH}/callerCandidates`);
-                    push(candidatesRef, event.candidate.toJSON());
-                    log("Sent ICE candidate", "info");
-                }
-            };
-
             pc.oniceconnectionstatechange = () => {
                 log(`ICE state: ${pc.iceConnectionState}`);
                 if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") {
-                    setStatus("Connected", "connected");
-                    log("WebRTC connected!", "success");
+                    setStatus(HETZNER_RELAY_ONLY ? "Connected (Hetzner)" : "Connected", "connected");
+                    log(HETZNER_RELAY_ONLY ? "WebRTC connected via Hetzner relay!" : "WebRTC connected!", "success");
+                    void logNominatedIcePath();
                     applyLowLatencyVideoHints();
                     startWebrtcStats();
                 } else if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
                     setStatus("Disconnected", "error");
                     log("Connection lost", "error");
+                    logPiCalleeIceSummary(pc.iceConnectionState);
+                    void logNominatedIcePath();
                     stopStatsTimer();
                 }
             };
@@ -618,7 +1089,15 @@
                 log(`Peer connection state: ${pc.connectionState}`);
                 if (pc.connectionState === "failed") {
                     setStatus("Failed", "error");
-                    log("PC failed — проверьте сеть, Firebase и что Pi отвечает answer+callee ICE", "error");
+                    if (HETZNER_RELAY_ONLY) {
+                        logPiCalleeIceSummary("failed");
+                        log(
+                            "Hetzner-only: нужен relay↔relay. На Pi: ice_transport_policy=relay. Или оператор без ?profile=hetzner",
+                            "error",
+                        );
+                    } else {
+                        log("PC failed — проверьте сеть, Firebase и что Pi отвечает answer+callee ICE", "error");
+                    }
                 }
             };
 
@@ -628,14 +1107,14 @@
             log("Created SDP offer");
 
             // Write offer to Firebase
-            await set(ref(db, `${ROOM_PATH}/offer`), {
+            await set(ref(db, `${roomPath}/offer`), {
                 type: offer.type,
                 sdp: offer.sdp
             });
             log("Offer written to Firebase");
 
             // Listen for SDP answer from Pi
-            const answerRef = ref(db, `${ROOM_PATH}/answer`);
+            const answerRef = ref(db, `${roomPath}/answer`);
             unsubscribeAnswer = onValue(answerRef, (snapshot) => {
                 void (async () => {
                     const data = snapshot.val();
@@ -644,10 +1123,42 @@
                     }
                     try {
                         log("Received SDP answer from Pi", "success");
-                        const answer = new RTCSessionDescription(data);
+                        let answerSdp = data.sdp;
+                        if (HETZNER_RELAY_ONLY && answerSdp) {
+                            const filtered = filterSdpIceRelayOnly(answerSdp);
+                            const dropped =
+                                (answerSdp.match(/\btyp host\b/gi) || []).length +
+                                (answerSdp.match(/\btyp srflx\b/gi) || []).length -
+                                ((filtered.match(/\btyp host\b/gi) || []).length +
+                                    (filtered.match(/\btyp srflx\b/gi) || []).length);
+                            if (dropped > 0) {
+                                log(
+                                    `Hetzner-only: из answer SDP убраны host/srflx (остались relay)`,
+                                    "warn",
+                                );
+                            }
+                            answerSdp = filtered;
+                        }
+                        const answer = new RTCSessionDescription({
+                            type: data.type,
+                            sdp: answerSdp,
+                        });
+                        logAnswerSdpIceTypes(answer.sdp);
                         await pc.setRemoteDescription(answer);
                         log("Remote description set", "success");
-                        await flushPendingCalleeIce();
+                        await applyRemoteIceAfterAnswer();
+                        for (const ms of [500, 1500, 3000]) {
+                            setTimeout(() => {
+                                void applyRemoteIceAfterAnswer().then(() => {
+                                    if (HETZNER_RELAY_ONLY && pc?.iceConnectionState === "checking") {
+                                        logPiCalleeIceSummary(`+${ms}ms`);
+                                    }
+                                });
+                            }, ms);
+                        }
+                        if (HETZNER_RELAY_ONLY) {
+                            logPiCalleeIceSummary("after answer");
+                        }
                         try {
                             for (const r of pc.getReceivers()) {
                                 if (r.track && r.track.kind === "video") {
@@ -668,16 +1179,7 @@
                     }
                 })();
             });
-
-            // ICE from Pi (must not call addIceCandidate before remote answer is applied — see queue above)
-            const calleeCandidatesRef = ref(db, `${ROOM_PATH}/calleeCandidates`);
-            unsubscribeCalleeIce = onChildAdded(calleeCandidatesRef, (snapshot) => {
-                const raw = snapshot.val();
-                if (!raw) {
-                    return;
-                }
-                void addCalleeIceCandidate(new RTCIceCandidate(raw));
-            });
+            connectInProgress = false;
         }
 
         // ============================================================
@@ -688,7 +1190,6 @@
             stopVideoInfoTimer();
             stopStatsTimer();
             teardownFirebaseListeners();
-            pendingCalleeCandidates = [];
             lowLatencyHintLogged = false;
 
             if (dataChannel) {
@@ -699,13 +1200,15 @@
                 pc.close();
                 pc = null;
             }
+            connectInProgress = false;
 
             document.getElementById("remoteVideo").srcObject = null;
             document.getElementById("videoInfo").textContent = "No stream";
 
             // Clean only caller-side data on hangup
-            await set(ref(db, `${ROOM_PATH}/offer`), null);
-            await set(ref(db, `${ROOM_PATH}/callerCandidates`), null);
+            const rp = lastSignalingRoomPath || getRoomPath();
+            await set(ref(db, `${rp}/offer`), null);
+            await set(ref(db, `${rp}/callerCandidates`), null);
 
             setStatus("Disconnected", "");
             document.getElementById("btnConnect").disabled = false;
@@ -717,13 +1220,7 @@
         // Commands via Data Channel
         // ============================================================
         function sendCmd(direction) {
-            const cmd = romeoDriveJson(direction);
-            if (dataChannel && dataChannel.readyState === "open") {
-                dataChannel.send(cmd);
-                log(`Sent: ${cmd}`);
-            } else {
-                log("Control channel not open (ждите onopen или проверьте Pi сторону)", "error");
-            }
+            sendDc(romeoDriveJson(direction));
         }
 
         function sendRawCmd() {
@@ -739,39 +1236,20 @@
             }
         }
 
-        // ============================================================
-        // Keyboard controls
-        // ============================================================
-        const keyMap = {
-            "KeyW": "forward", "ArrowUp": "forward",
-            "KeyS": "backward", "ArrowDown": "backward",
-            "KeyA": "left", "ArrowLeft": "left",
-            "KeyD": "right", "ArrowRight": "right"
-        };
-        const activeKeys = new Set();
+        detachControlKeys = attachBrowserControlKeys((cmd) => sendDc(cmd));
 
-        document.addEventListener("keydown", (e) => {
-            if (e.target.tagName === "INPUT") return;
-            const dir = keyMap[e.code];
-            if (dir && !activeKeys.has(e.code)) {
-                activeKeys.add(e.code);
-                sendCmd(dir);
-            }
-        });
-
-        document.addEventListener("keyup", (e) => {
-            if (e.target.tagName === "INPUT") return;
-            const dir = keyMap[e.code];
-            if (dir && activeKeys.has(e.code)) {
-                activeKeys.delete(e.code);
-                if (activeKeys.size === 0) {
-                    sendCmd("stop");
-                }
-            }
-        });
-
-        log(`Firebase room: ${ROOM_PATH}`, "info");
-        log("Ready. Click Connect to start.", "success");
+        ensureHostLaunchWatch();
+        if (typeof window.__webrtcMarkReady === "function") {
+            window.__webrtcMarkReady();
+        }
+        log(`Firebase room (default UI): ${getRoomPath()}`, "info");
+        if (!db) {
+            log("Firebase не инициализирован — проверьте webrtc.firebase.local.js", "error");
+        } else if (HETZNER_RELAY_ONLY) {
+            log("DEBUG Hetzner-only: Test ICE → Connect (только TURN, без прямого P2P)", "warn");
+        } else {
+            log("Ready. Click Connect to start.", "success");
+        }
     </script>
 </body>
 </html>

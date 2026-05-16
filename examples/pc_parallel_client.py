@@ -789,6 +789,7 @@ def keyboard_control_loop(
     video_thread: threading.Thread | None,
     romeo: RomeoControlClient | None = None,
     quiet: bool,
+    romeo_debug: bool = False,
 ) -> None:
     tag = "control"
     if not _IS_WIN or _user32 is None:
@@ -806,7 +807,7 @@ def keyboard_control_loop(
             host,
             port,
             connect_timeout=5.0,
-            debug=False,
+            debug=romeo_debug,
             rx_timeout=0.6,
             max_attempts=3,
         )
@@ -820,12 +821,11 @@ def keyboard_control_loop(
         "turret_smooth_stop_grace_from": None,
         "turret_release_from": None,
         "oneshot_stop": False,
-        "oneshot_home": False,
         "oneshot_save": False,
     }
     if not quiet:
         print(
-            "[control] Win32 keyboard active: WASD drive, IJKL/стрелки башня (I↑ K↓ J← L→), Space stop, H home, M save, "
+            "[control] Win32 keyboard active: WASD drive, IJKL/стрелки башня (I↑ K↓ J← L→), Space stop, H/Home home, M save, "
             "1..8 presets, +/- zoom, 0 reset, P status, Q/Esc exit.",
             flush=True,
         )
@@ -984,7 +984,32 @@ def main() -> int:
     ap.add_argument("--stress-interval", type=float, default=0.03, help="сек между командами")
     ap.add_argument("--stress-seconds", type=float, default=8.0, help="длительность stress")
     ap.add_argument("--quiet", action="store_true")
+    ap.add_argument(
+        "--romeo-turret-dir-names",
+        choices=("long", "short"),
+        default="long",
+        metavar="STYLE",
+        help="Башня на Pi: long=up/down/left/right в JSON, short=TU/TD/PL/PR если прошивка не принимает длинные имена.",
+    )
+    ap.add_argument(
+        "--no-romeo-turret-lr-swap",
+        action="store_true",
+        help="Не менять left↔right для башни (по умолчанию на провод уходит зеркально к клавишам J/L и стрелкам влево/вправо).",
+    )
+    ap.add_argument(
+        "--romeo-debug",
+        action="store_true",
+        help="Печать в лог каждой команды Romeo (TX) и ответа (RX); для проверки turret_smooth.",
+    )
     args = ap.parse_args()
+
+    if args.romeo_turret_dir_names == "short":
+        os.environ["ROMEO_TURRET_DIR_STYLE"] = "short"
+    else:
+        os.environ.pop("ROMEO_TURRET_DIR_STYLE", None)
+
+    if args.no_romeo_turret_lr_swap:
+        os.environ["ROMEO_TURRET_LR_SWAP"] = "0"
 
     stop = threading.Event()
     frame_queue: queue.Queue | None = None
@@ -1081,7 +1106,7 @@ def main() -> int:
             args.host,
             args.control_port,
             connect_timeout=5.0,
-            debug=False,
+            debug=args.romeo_debug,
             rx_timeout=0.6,
             max_attempts=3,
         )
@@ -1136,6 +1161,7 @@ def main() -> int:
                     video_thread=vt,
                     romeo=shared_romeo,
                     quiet=args.quiet,
+                    romeo_debug=args.romeo_debug,
                 )
             else:
                 control_interactive(args.host, args.control_port, stop, args.quiet)

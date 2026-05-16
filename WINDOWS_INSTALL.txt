@@ -1,0 +1,52 @@
+Установка как «приложение» на Windows (On-windows)
+==================================================
+
+1) Установите Python 3.10+ с https://www.python.org/ (галочка «Add python.exe to PATH»).
+
+2) Откройте PowerShell в корне репозитория и выполните:
+
+   powershell -ExecutionPolicy Bypass -File .\scripts\install_on_windows.ps1
+
+   Опции:
+   -DesktopShortcuts     — ярлыки на рабочем столе
+   -AddToUserPath        — чтобы вызывать ReceiveStream.cmd из любой папки
+
+   Пример:
+   powershell -ExecutionPolicy Bypass -File .\scripts\install_on_windows.ps1 -DesktopShortcuts -AddToUserPath
+
+3) По умолчанию всё ставится в:
+   %LOCALAPPDATA%\Programs\On-windows
+
+   Запуск:
+   - ReceiveStream.cmd connect --host <IP>
+   - PcParallelClient.cmd --host <IP> ...
+   - OpenWebRtcOperator.cmd  (WebRTC через VPS: читает config\webrtc.ice.local.env)
+
+4) WebRTC в браузере (камера Pi через VPS TURN + Firebase)
+
+   На VPS (один раз скопировать вывод):
+     sudo /root/project/scripts/show-ice-client-env.sh
+
+   На ПК — записать token (без ручного редактирования файла):
+     powershell -ExecutionPolicy Bypass -File .\scripts\set-ice-token.ps1
+
+   Или вручную:
+     copy config\webrtc.ice.local.env.example config\webrtc.ice.local.env
+     copy config\webrtc.firebase.local.js.example webrtc.firebase.local.js
+     (заполните токен ICE и реальные ключи Firebase — как на Pi)
+
+   Запуск:
+     powershell -ExecutionPolicy Bypass -File .\scripts\open_webrtc_operator.ps1
+     или OpenWebRtcOperator.cmd
+
+   В странице: Test ICE (VPS) → Connect. Комната по умолчанию pi-camera (rooms/pi-camera).
+
+   Режим DEBUG «только Hetzner» (без прямого P2P, iceTransportPolicy=relay):
+     powershell -ExecutionPolicy Bypass -File .\scripts\open_webrtc_operator_hetzner_debug.ps1
+     или VS Code: Run and Debug → WebRTC: только Hetzner / TURN (debug)
+
+5) Удаление:
+   powershell -ExecutionPolicy Bypass -File .\scripts\uninstall_on_windows.ps1
+
+Примечание: GStreamer и ffplay в установщик не входят — их по-прежнему нужно
+поставить отдельно, если вы ими пользуетесь для видео.

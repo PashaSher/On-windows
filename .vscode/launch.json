@@ -40,10 +40,27 @@
       ]
     },
     {
-      "name": "WebRTC: webrtc-client.html в Chrome",
+      "name": "WebRTC: оператор (http localhost)",
       "type": "chrome",
       "request": "launch",
-      "file": "${workspaceFolder}/webrtc-client.html"
+      "url": "http://127.0.0.1:8765/webrtc-client.html",
+      "webRoot": "${workspaceFolder}",
+      "preLaunchTask": "webrtc-operator-serve"
+    },
+    {
+      "name": "WebRTC: только Hetzner / TURN (debug)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://127.0.0.1:8765/webrtc-client.html?profile=hetzner-relay-only&room=pi-camera",
+      "webRoot": "${workspaceFolder}",
+      "preLaunchTask": "webrtc-operator-serve"
+    },
+    {
+      "name": "WebRTC: file:// (без сервера, может ломать modules)",
+      "type": "chrome",
+      "request": "launch",
+      "file": "${workspaceFolder}/webrtc-client.html",
+      "webRoot": "${workspaceFolder}"
     }
   ]
 }

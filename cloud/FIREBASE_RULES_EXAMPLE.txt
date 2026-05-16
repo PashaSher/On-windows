@@ -1,0 +1,22 @@
+Пример правил Realtime Database (НЕ копируйте слепо — подставьте свою модель).
+
+Идея для продажи роботов:
+- Каждый робот = ветка rooms/<robotId>/...
+- Писать offer/callerCandidates может только «владелец» или гость с invite-токеном
+- Писать answer/calleeCandidates — только агент на Pi (custom auth / device token)
+
+MVP для разработки (ОПАСНО в проде — открывает комнату всем):
+
+{
+  "rules": {
+    "rooms": {
+      "$roomId": {
+        ".read": true,
+        ".write": true
+      }
+    }
+  }
+}
+
+Дальше: замените на auth != null + проверка uid в списке владельцев/гостей
+(через Cloud Functions или вложенные узлы owners/{uid}=true).

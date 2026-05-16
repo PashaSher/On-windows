@@ -1,0 +1,30 @@
+# Pi: WebRTC с тем же TURN, что браузер в режиме «только Hetzner»
+#
+# Симптом в браузере: ICE local (relay) есть, но ICE failed / disconnected,
+# в логе Pi ICE: relay=0 (только host/srflx).
+#
+# 1) Тот же token и URL, что на ПК:
+#      sudo /root/project/scripts/show-ice-client-env.sh
+#    → config/webrtc.ice.local.env на Pi (WEBRTC_ICE_CONFIG_*)
+#
+# 2) stream_camera / camstream — те же флаги ICE, что уже для webrtc:
+#      --ice-config-url http://116.203.148.254:8788/api/ice
+#      --ice-config-token <тот же token>
+#
+# 3) Обязательно relay-only на Pi (иначе пары с браузером не соберутся):
+#
+#    aiortc (Python):
+#      RTCConfiguration(
+#          iceServers=[... из /api/ice ...],
+#          iceTransportPolicy="relay",
+#      )
+#
+#    GStreamer webrtcbin:
+#      ice-transport-policy=relay
+#      (или 1 = GST_WEBRTC_ICE_TRANSPORT_POLICY_RELAY)
+#
+# 4) Перезапуск:
+#      sudo systemctl restart camstream.service
+#
+# 5) В браузере (Hetzner debug): Test ICE → Connect
+#    Успех: Pi ICE (relay) applied, ICE path: relay → relay

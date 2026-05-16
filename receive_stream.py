@@ -60,6 +60,9 @@ romeo-tx пишет/читает/повторяет, чтобы UI не блок
 Башня (IJKL/стрелки, как в играх: I вверх, K вниз, J влево, L вправо) в hold-режиме:
   smooth: при нажатии — turret_smooth dir [,v]; при отпускании — turret_stop.
   step:   при нажатии — turret dir.
+  Горизонталь: по умолчанию left↔right на проводе меняются местами (типичная «зеркальная» сборка серв);
+  отключить: --no-romeo-turret-lr-swap или ROMEO_TURRET_LR_SWAP=0.
+  Дом: H или клавиша Home — {\"action\":\"home\"}; если Pi ждёт сырую строку, задайте ROMEO_HOME_RAW_LINE (например HM).
 """
 
 from __future__ import annotations
@@ -89,6 +92,34 @@ VIDEO_BACKEND_DEFAULT = VIDEO_BACKEND_EXTERNAL_FFPLAY
 # Минимум между turret_stop на провод: при дребезге клавиш/фокуса Pi получает пачку
 # одинаковых команд, writer блокируется на ответах — «зависание» управления.
 _TURRET_STOP_MIN_INTERVAL_S = 0.22
+
+
+def _romeo_turret_lr_swap_enabled() -> bool:
+    """Поменять left↔right в JSON для башни (часто сервы на Pi «зеркальны» к кокпиту).
+
+    ROMEO_TURRET_LR_SWAP: пусто или 1/true/on — менять (по умолчанию); 0/false/off/no — не менять.
+    На receive_stream / pc_parallel: флаг --no-romeo-turret-lr-swap выставляет 0.
+    """
+    v = os.environ.get("ROMEO_TURRET_LR_SWAP", "").strip().lower()
+    if v in ("0", "false", "no", "off"):
+        return False
+    if v in ("1", "true", "yes", "on"):
+        return True
+    return True
+
+
+def _romeo_turret_dir_wire(d: str) -> str:
+    """Поле dir в JSON для башни: часть прошивок Romeo ждёт TU/TD/PL/PR вместо up/down/left/right.
+
+    Задаётся через --romeo-turret-dir-names short (receive_stream, pc_parallel) или
+    переменную окружения ROMEO_TURRET_DIR_STYLE=short.
+    """
+    if _romeo_turret_lr_swap_enabled():
+        d = {"left": "right", "right": "left"}.get(d, d)
+    s = os.environ.get("ROMEO_TURRET_DIR_STYLE", "").strip().lower()
+    if s in ("short", "legacy", "tu"):
+        return {"up": "TU", "down": "TD", "left": "PL", "right": "PR"}.get(d, d)
+    return d
 
 # OpenCV waitKeyEx: стрелки (типичные коды Windows)
 _ARROW_TURRET = {
@@ -195,7 +226,7 @@ if _IS_WIN:
 _VK_W, _VK_A, _VK_S, _VK_D = 0x57, 0x41, 0x53, 0x44
 _VK_I, _VK_J, _VK_K, _VK_L = 0x49, 0x4A, 0x4B, 0x4C
 _VK_LEFT, _VK_UP, _VK_RIGHT, _VK_DOWN = 0x25, 0x26, 0x27, 0x28
-_VK_SPACE, _VK_ESC, _VK_Q, _VK_H, _VK_M, _VK_X = 0x20, 0x1B, 0x51, 0x48, 0x4D, 0x58
+_VK_SPACE, _VK_ESC, _VK_Q, _VK_H, _VK_HOME, _VK_M, _VK_X = 0x20, 0x1B, 0x51, 0x48, 0x24, 0x4D, 0x58
 _VK_P = 0x50
 _VK_0, _VK_1, _VK_2, _VK_3, _VK_4 = 0x30, 0x31, 0x32, 0x33, 0x34
 _VK_5, _VK_6, _VK_7, _VK_8 = 0x35, 0x36, 0x37, 0x38
@@ -225,6 +256,7 @@ _WIN_ROMEO_DRAIN_VKS: frozenset[int] = frozenset(
         _VK_ESC,
         _VK_Q,
         _VK_H,
+        _VK_HOME,
         _VK_M,
         _VK_X,
         _VK_P,
@@ -330,7 +362,7 @@ def _read_input_state_win(window_hwnd: int | None, *, require_focus: bool = True
         "drive_keys": drive_keys,
         "turret_dir": turret_dir,
         "stop": _key_down_win(_VK_SPACE) or _key_down_win(_VK_X),
-        "home": _key_down_win(_VK_H),
+        "home": _key_down_win(_VK_H) or _key_down_win(_VK_HOME),
         "save": _key_down_win(_VK_M),
         "quit": _key_down_win(_VK_Q) or _key_down_win(_VK_ESC),
         "camera_preset_1": _key_down_win(_VK_1) or _key_down_win(_VK_NUMPAD1),
@@ -379,13 +411,12 @@ def _romeo_keyboard_state(
     if pressed is None or not pressed.get("focus", False):
         new_drive = None
         new_turret = None
-        new_stop = new_home = new_save = False
+        new_stop = new_save = False
         drive_keys: dict[str, bool] = {d: False for d in _DRIVE_KEY_ORDER}
     else:
         new_drive = pressed.get("drive_dir")
         new_turret = pressed.get("turret_dir")
         new_stop = bool(pressed.get("stop"))
-        new_home = bool(pressed.get("home"))
         new_save = bool(pressed.get("save"))
         raw = pressed.get("drive_keys") or {}
         drive_keys = {d: bool(raw.get(d, False)) for d in _DRIVE_KEY_ORDER}
@@ -443,7 +474,10 @@ def _romeo_keyboard_state(
         if new_turret is not None:
             state["turret_release_from"] = None
             if cur_turret != new_turret:
-                cmd_sm: dict[str, object] = {"action": "turret_smooth", "dir": new_turret}
+                cmd_sm: dict[str, object] = {
+                    "action": "turret_smooth",
+                    "dir": _romeo_turret_dir_wire(new_turret),
+                }
                 if turret_smooth_v > 0.0:
                     cmd_sm["v"] = turret_smooth_v
                 romeo.send_json_cmd(cmd_sm)
@@ -476,7 +510,7 @@ def _romeo_keyboard_state(
         if new_turret is not None:
             state["turret_release_from"] = None
             if cur_turret != new_turret:
-                romeo.send_json_cmd({"action": "turret", "dir": new_turret})
+                romeo.send_json_cmd({"action": "turret", "dir": _romeo_turret_dir_wire(new_turret)})
                 log.debug("romeo cmd turret %s (queued, edge press)", new_turret)
                 state["turret_dir"] = new_turret
         elif cur_turret is not None:
@@ -500,10 +534,10 @@ def _romeo_keyboard_state(
         romeo.send_json_cmd({"action": "drive", "dir": "stop"})
         log.info("romeo cmd stop (space/x) queued")
     state["oneshot_stop"] = new_stop
-    if new_home and not state.get("oneshot_home", False):
-        romeo.send_json_cmd({"action": "home"})
-        log.info("romeo cmd home queued")
-    state["oneshot_home"] = new_home
+    home_now = bool(pressed and pressed.get("focus") and pressed.get("home"))
+    if home_now and not bool(state.get("_home_prev", False)):
+        _romeo_send_home(romeo)
+    state["_home_prev"] = home_now
     if new_save and not state.get("oneshot_save", False):
         romeo.send_line("MS")
         log.info("romeo cmd MS queued")
@@ -1123,6 +1157,15 @@ class RomeoControlClient:
         self.send_line(json.dumps(obj, separators=(",", ":")))
 
 
+def _romeo_send_home(romeo: RomeoControlClient) -> None:
+    """Дом: JSON home; опционально вторая строка (ROMEO_HOME_RAW_LINE), если Pi ждёт сырой протокол."""
+    romeo.send_json_cmd({"action": "home"})
+    raw = os.environ.get("ROMEO_HOME_RAW_LINE", "").strip()
+    if raw:
+        romeo.send_line(raw)
+    log.info("romeo cmd home queued")
+
+
 def _try_raise_preview_window(window: str) -> None:
     """Чуть поднять окно превью (часто помогает получить фокус для waitKey)."""
     import cv2
@@ -1233,7 +1276,10 @@ def _romeo_keyboard(
         if td is not None:
             state["turret_smooth_stop_grace_from"] = None
             if prev_smooth != td:
-                cmd_sm: dict[str, object] = {"action": "turret_smooth", "dir": td}
+                cmd_sm: dict[str, object] = {
+                    "action": "turret_smooth",
+                    "dir": _romeo_turret_dir_wire(td),
+                }
                 if turret_smooth_v > 0.0:
                     cmd_sm["v"] = turret_smooth_v
                 romeo.send_json_cmd(cmd_sm)
@@ -1264,7 +1310,7 @@ def _romeo_keyboard(
         if td is not None:
             state["turret_smooth_stop_grace_from"] = None
             if state.get("turret_dir") != td:
-                romeo.send_json_cmd({"action": "turret", "dir": td})
+                romeo.send_json_cmd({"action": "turret", "dir": _romeo_turret_dir_wire(td)})
                 log.debug("romeo cmd turret %s (queued, edge press)", td)
                 state["turret_dir"] = td
         elif state.get("turret_dir") is not None:
@@ -1287,8 +1333,7 @@ def _romeo_keyboard(
         romeo.send_json_cmd({"action": "drive", "dir": "stop"})
         log.info("romeo cmd stop (space/x) queued")
     if u in (ord("h"), ord("H"), ord("р"), ord("Р")) and key != prev_key:
-        romeo.send_json_cmd({"action": "home"})
-        log.info("romeo cmd home queued")
+        _romeo_send_home(romeo)
     if u in (ord("m"), ord("M"), ord("ь"), ord("Ь")) and key != prev_key:
         romeo.send_line("MS")
         log.info("romeo cmd MS queued")
@@ -1700,7 +1745,6 @@ def stream_to_window(
         "turret_smooth_stop_grace_from": None,
         "turret_release_from": None,
         "oneshot_stop": False,
-        "oneshot_home": False,
         "oneshot_save": False,
     }
 
@@ -1978,7 +2022,6 @@ def run_external_video_session(
         "turret_smooth_stop_grace_from": None,
         "turret_release_from": None,
         "oneshot_stop": False,
-        "oneshot_home": False,
         "oneshot_save": False,
     }
 
@@ -2362,6 +2405,19 @@ def main() -> None:
         default="INFO",
     )
     parser.add_argument("-v", "--verbose", action="count", default=0)
+    parser.add_argument(
+        "--romeo-turret-dir-names",
+        choices=("long", "short"),
+        default="long",
+        metavar="STYLE",
+        help="Формат dir в JSON для башни (turret / turret_smooth): long=up/down/left/right, "
+             "short=TU/TD/PL/PR — если на Pi romeo_control_server принимает только короткие коды.",
+    )
+    parser.add_argument(
+        "--no-romeo-turret-lr-swap",
+        action="store_true",
+        help="Не менять left↔right для башни (по умолчанию меняются: совпадает с типичной «зеркальной» установкой серв).",
+    )
 
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -2424,7 +2480,7 @@ def main() -> None:
         "--romeo-turret-mode",
         choices=("smooth", "velocity", "step"),
         default="smooth",
-        help="Башня: smooth|velocity=turret_smooth+stop (PL/PR/TU/TD); step=turret+repeat",
+        help="Башня: smooth|velocity=turret_smooth+stop; dir=up/down/left/right или TU/TD/PL/PR (--romeo-turret-dir-names short); step=turret+repeat",
     )
     p_listen.add_argument(
         "--romeo-turret-smooth-v",
@@ -2577,7 +2633,7 @@ def main() -> None:
         "--romeo-turret-mode",
         choices=("smooth", "velocity", "step"),
         default="smooth",
-        help="Башня: smooth|velocity=turret_smooth+stop; step=turret+repeat",
+        help="Башня: smooth|velocity=turret_smooth+stop; step=turret+repeat (см. --romeo-turret-dir-names)",
     )
     p_conn.add_argument(
         "--romeo-turret-smooth-v",
@@ -2675,6 +2731,14 @@ def main() -> None:
     args = parser.parse_args()
     level = logging.DEBUG if args.verbose else getattr(logging, args.log_level)
     setup_logging(level)
+
+    if args.romeo_turret_dir_names == "short":
+        os.environ["ROMEO_TURRET_DIR_STYLE"] = "short"
+    else:
+        os.environ.pop("ROMEO_TURRET_DIR_STYLE", None)
+
+    if args.no_romeo_turret_lr_swap:
+        os.environ["ROMEO_TURRET_LR_SWAP"] = "0"
 
     if args.cmd == "listen":
         disc = None if args.no_discovery or args.discover_port == 0 else args.discover_port

@@ -1,0 +1,13 @@
+// Скопируйте в корень рядом с webrtc-client.html:
+//   copy config\webrtc.firebase.local.js.example webrtc.firebase.local.js
+// Тот же Firebase-проект, что на Pi и в основном репозитории робота.
+
+window.WEBRTC_FIREBASE_CONFIG = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "bro-oppy.firebaseapp.com",
+    databaseURL: "https://bro-oppy-default-rtdb.firebaseio.com",
+    projectId: "bro-oppy",
+    storageBucket: "bro-oppy.appspot.com",
+    messagingSenderId: "YOUR_SENDER_ID",
+    appId: "YOUR_APP_ID",
+};
