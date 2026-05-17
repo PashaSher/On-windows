@@ -22,9 +22,10 @@
             justify-content: space-between;
             border-bottom: 1px solid #0f3460;
         }
-        header h1 {
-            font-size: 1.2rem;
-            color: #4fc3f7;
+        .header-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
         }
         #status {
             font-size: 0.85rem;
@@ -36,18 +37,53 @@
         #status.connecting { background: #e65100; color: #ffcc80; }
         #status.error { background: #b71c1c; color: #ef9a9a; }
 
+        .header-center {
+            flex: 1;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            gap: 6px 14px;
+            padding: 0 8px;
+            min-width: 0;
+        }
+        .telemetry-item {
+            font-size: 0.78rem;
+            color: #b0bec5;
+            white-space: nowrap;
+        }
+        .telemetry-item.telemetry--low { color: #ef9a9a; }
+        .telemetry-item.telemetry--offline { color: #ffab91; }
+        .telemetry-age {
+            font-size: 0.68rem;
+            color: #78909c;
+        }
+        @media (max-width: 520px) {
+            header { flex-wrap: wrap; gap: 8px; padding: 10px 12px; }
+            .header-center { order: 3; flex-basis: 100%; justify-content: flex-start; }
+        }
+
         .main {
             flex: 1;
             display: flex;
             overflow: hidden;
+            min-height: 0;
+        }
+        .stage {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            min-height: 0;
+            background: #000;
         }
         .video-container {
             flex: 1;
             display: flex;
             align-items: center;
             justify-content: center;
-            background: #000;
             position: relative;
+            min-height: 180px;
         }
         #remoteVideo {
             max-width: 100%;
@@ -57,31 +93,16 @@
             min-height: 240px;
             background: #111;
         }
-        .video-overlay {
+        .sr-only {
             position: absolute;
-            top: 12px;
-            left: 12px;
-            font-size: 0.75rem;
-            color: #4fc3f7;
-            background: rgba(0,0,0,0.6);
-            padding: 4px 8px;
-            border-radius: 4px;
-        }
-
-        .sidebar {
-            width: 320px;
-            background: #16213e;
-            border-left: 1px solid #0f3460;
-            display: flex;
-            flex-direction: column;
-            padding: 16px;
-            gap: 12px;
-            overflow-y: auto;
-        }
-        .sidebar h3 {
-            color: #4fc3f7;
-            font-size: 0.9rem;
-            margin-bottom: 4px;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
         }
         .btn {
             padding: 10px 16px;
@@ -107,126 +128,140 @@
             cursor: not-allowed;
         }
 
-        .controls-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 6px;
+        .control-dock {
+            flex-shrink: 0;
+            background: linear-gradient(180deg, #0d1b2a 0%, #16213e 100%);
+            border-top: 1px solid #0f3460;
+            padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
         }
-        .controls-grid .btn {
-            padding: 14px 8px;
-            background: #0f3460;
-            color: #e0e0e0;
-            font-size: 1.1rem;
-        }
-        .controls-grid .btn:hover { background: #1a4a7a; }
-        .controls-grid .btn:active { background: #4fc3f7; color: #000; }
-
-        #log {
-            flex: 1;
-            background: #0d1b2a;
-            border-radius: 6px;
-            padding: 8px;
-            font-family: 'Cascadia Code', 'Consolas', monospace;
-            font-size: 0.75rem;
-            overflow-y: auto;
-            line-height: 1.4;
-            min-height: 120px;
-        }
-        #log .info { color: #4fc3f7; }
-        #log .error { color: #ef5350; }
-        #log .success { color: #66bb6a; }
-        #log .warn { color: #ffa726; }
-
-        .cmd-input {
+        .joystick-row {
             display: flex;
-            gap: 6px;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            max-width: 520px;
+            margin: 0 auto;
         }
-        .cmd-input input {
+        .joystick-wrap {
             flex: 1;
-            padding: 8px 12px;
-            border: 1px solid #0f3460;
-            border-radius: 6px;
-            background: #0d1b2a;
-            color: #e0e0e0;
-            font-family: monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            min-width: 0;
+        }
+        .joystick-wrap > .joystick-label {
+            font-size: 0.68rem;
+            color: #8ab4d4;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .joystick {
+            position: relative;
+            width: min(42vw, 150px);
+            height: min(42vw, 150px);
+            max-width: 150px;
+            max-height: 150px;
+            border-radius: 50%;
+            background: radial-gradient(circle at 35% 30%, #1a4a7a 0%, #0a1628 70%);
+            border: 2px solid #2a5a8a;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+            touch-action: none;
+        }
+        .joystick-ring {
+            position: absolute;
+            inset: 12%;
+            border-radius: 50%;
+            border: 1px dashed rgba(79, 195, 247, 0.25);
+            pointer-events: none;
+        }
+        .joystick-knob {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            width: 44%;
+            height: 44%;
+            border-radius: 50%;
+            background: linear-gradient(145deg, #4fc3f7, #1976d2);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.45);
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+        .joystick--turret .joystick-knob {
+            background: linear-gradient(145deg, #81c784, #388e3c);
+        }
+        .joystick-caption {
+            display: none;
+        }
+        .joystick-mid {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        .joystick-mid .btn-round {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            border: none;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            touch-action: manipulation;
+        }
+        .btn-home-round {
+            background: #455a64;
+            color: #fff;
             font-size: 0.85rem;
         }
-        .cmd-input input:focus {
-            outline: none;
-            border-color: #4fc3f7;
+        @media (min-width: 901px) {
+            .joystick { width: 130px; height: 130px; }
         }
     </style>
 </head>
 <body>
     <header>
-        <h1>Romeo WebRTC Operator</h1>
+        <div class="header-actions">
+            <button class="btn btn-primary" id="btnConnect" onclick="startConnection()">Connect</button>
+            <button class="btn btn-danger" id="btnDisconnect" onclick="hangup()" disabled>Disconnect</button>
+        </div>
+        <div class="header-center" id="telemetryBar">
+            <span class="telemetry-item" id="telemetryBattery">Батарея: —</span>
+            <span class="telemetry-item" id="telemetryWifi">Wi‑Fi: —</span>
+            <span class="telemetry-age" id="telemetryAge"></span>
+        </div>
         <span id="status">Disconnected</span>
     </header>
 
+    <div class="sr-only" aria-hidden="true">
+        <input type="text" id="inputRoomId" value="pi-camera" tabindex="-1">
+        <input type="text" id="inputIceUrl" value="" tabindex="-1">
+        <input type="text" id="inputIceToken" value="" tabindex="-1">
+    </div>
+
     <div class="main">
-        <div class="video-container">
-            <video id="remoteVideo" autoplay playsinline muted></video>
-            <div class="video-overlay" id="videoInfo">No stream</div>
-        </div>
+        <div class="stage">
+            <div class="video-container">
+                <video id="remoteVideo" autoplay playsinline muted></video>
+            </div>
 
-        <div class="sidebar">
-            <div>
-                <h3>Connection</h3>
-                <div style="display:flex; gap:8px; margin-top:8px;">
-                    <button class="btn btn-primary" id="btnConnect" onclick="startConnection()">Connect</button>
-                    <button class="btn btn-danger" id="btnDisconnect" onclick="hangup()" disabled>Disconnect</button>
+            <div class="control-dock" id="controlDock">
+                <div class="joystick-row">
+                    <div class="joystick-wrap">
+                        <span class="joystick-label">Езда</span>
+                        <div id="joyDrive" aria-label="Джойстик езды"></div>
+                    </div>
+                    <div class="joystick-mid">
+                        <button type="button" class="btn-round btn-home-round" id="btnHome" title="Home">H</button>
+                    </div>
+                    <div class="joystick-wrap">
+                        <span class="joystick-label">Камера</span>
+                        <div id="joyTurret" aria-label="Джойстик камеры"></div>
+                    </div>
                 </div>
-            </div>
-
-            <div>
-                <h3>Room &amp; ICE (cloud)</h3>
-                <p style="font-size:0.72rem;color:#888;margin:6px 0;">Канал через VPS: STUN/TURN с <code>116.203.148.254:8788/api/ice</code> (coturn на том же сервере). Токен — с VPS <code>show-ice-client-env.sh</code>; на Windows: <code>config\webrtc.ice.local.env</code> + <code>scripts\open_webrtc_operator.ps1</code>.</p>
-                <label style="font-size:0.72rem;color:#aaa;display:block;margin-top:6px;">Комната (VPS signaling)</label>
-                <input type="text" id="inputRoomId" value="pi-camera" placeholder="robot-ABC или rooms/robot-ABC"
-                    style="width:100%;box-sizing:border-box;padding:8px 10px;margin:4px 0 8px;border:1px solid #0f3460;border-radius:6px;background:#0d1b2a;color:#e0e0e0;font-size:0.82rem;">
-                <label style="font-size:0.72rem;color:#aaa;display:block;">ICE config URL (опционально)</label>
-                <input type="text" id="inputIceUrl" value="" placeholder="http://116.203.148.254:8788/api/ice или /api/ice на этом же хосте"
-                    style="width:100%;box-sizing:border-box;padding:8px 10px;margin:4px 0 8px;border:1px solid #0f3460;border-radius:6px;background:#0d1b2a;color:#e0e0e0;font-size:0.82rem;">
-                <label style="font-size:0.72rem;color:#ffa726;display:block;font-weight:600;">ICE token (обязательно — иначе 401, без TURN)</label>
-                <input type="text" id="inputIceToken" placeholder="вставьте ICE_CONFIG_TOKEN с VPS"
-                    autocomplete="off" spellcheck="false"
-                    style="width:100%;box-sizing:border-box;padding:8px 10px;margin:4px 0 4px;border:2px solid #e65100;border-radius:6px;background:#0d1b2a;color:#ffe0b2;font-size:0.82rem;font-family:Consolas,monospace;">
-                <p id="iceTokenHint" style="font-size:0.68rem;color:#888;margin:0 0 8px;line-height:1.35;">
-                    1) VPS: <code>sudo …/show-ice-client-env.sh</code><br>
-                    2) Скопируйте token → вставьте сюда → <b>Save in this browser</b><br>
-                    3) <b>Test ICE (VPS)</b> — в логе должны быть строки <code>turn:</code>
-                </p>
-                <button type="button" class="btn" style="width:100%;margin-top:4px;background:#0f3460;color:#e0e0e0;" id="btnSaveWebrtc" onclick="saveWebrtcSettings()">Save in this browser</button>
-                <button type="button" class="btn" style="width:100%;margin-top:6px;background:#2e7d32;color:#fff;" id="btnTestIce" onclick="testIceConfig()">Test ICE (VPS)</button>
-                <p style="font-size:0.68rem;color:#666;margin-top:8px;">Одна ссылка: <code>http://116.203.148.254/cam</code> (всё на VPS, без Firebase).</p>
-            </div>
-
-            <div>
-                <h3>Drive WASD · Turret arrows / IJKL</h3>
-                <div class="controls-grid">
-                    <div></div>
-                    <button class="btn" onmousedown="sendCmd('forward')" onmouseup="sendCmd('stop')">&#9650; W</button>
-                    <div></div>
-                    <button class="btn" onmousedown="sendCmd('left')" onmouseup="sendCmd('stop')">&#9664; A</button>
-                    <button class="btn" onmousedown="sendCmd('stop')">&#9632;</button>
-                    <button class="btn" onmousedown="sendCmd('right')" onmouseup="sendCmd('stop')">&#9654; D</button>
-                    <div></div>
-                    <button class="btn" onmousedown="sendCmd('backward')" onmouseup="sendCmd('stop')">&#9660; S</button>
-                    <div></div>
-                </div>
-            </div>
-
-            <div>
-                <h3>Custom Command</h3>
-                <div class="cmd-input">
-                    <input type="text" id="cmdInput" placeholder='{"action":"drive","dir":"forward"}' onkeydown="if(event.key==='Enter')sendRawCmd()">
-                    <button class="btn btn-primary" onclick="sendRawCmd()">Send</button>
-                </div>
-            </div>
-
-            <div style="flex:1; display:flex; flex-direction:column;">
-                <h3>Log</h3>
-                <div id="log"></div>
             </div>
         </div>
     </div>
@@ -245,13 +280,7 @@
                 return "http://116.203.148.254:8788/api/ice";
             }
             const DEFAULT_ICE = defaultOperatorIceUrl();
-            function bootLog(msg, level) {
-                const el = document.getElementById("log");
-                if (!el) return;
-                const time = new Date().toLocaleTimeString();
-                el.innerHTML += "<div class=\"" + (level || "error") + "\">[" + time + "] " + msg + "</" + "div>";
-                el.scrollTop = el.scrollHeight;
-            }
+            function bootLog(msg) { if (msg) console.warn("[webrtc]", msg); }
             function applyDefaultFields() {
                 const qs = new URLSearchParams(window.location.search);
                 const r = document.getElementById("inputRoomId");
@@ -283,7 +312,7 @@
             window.__webrtcMarkReady = function () {
                 window.__webrtcAppReady = true;
             };
-            ["startConnection", "testIceConfig", "hangup", "saveWebrtcSettings"].forEach((name) => {
+            ["startConnection", "hangup"].forEach((name) => {
                 window[name] = function () {
                     bootLog("Модуль ещё не загружен — подождите или F12 → Console", "error");
                     bootLog(
@@ -318,7 +347,10 @@
             romeoDriveJson,
             romeoTurretSmoothJson,
             romeoTurretStopJson,
+            romeoHomeJson,
         } from "./examples/webrtc_browser_control_keys.js";
+        import { mountVirtualJoystick } from "./examples/webrtc_touch_joysticks.js";
+        import { updateHostTelemetryUi } from "./examples/webrtc_host_telemetry.js";
 
         async function loadOperatorBootstrap() {
             const qs = new URLSearchParams(window.location.search);
@@ -590,9 +622,32 @@
         /** Счётчик typ в ICE от Pi (Firebase calleeCandidates) — для Hetzner-only диагностики */
         let piCalleeIceStats = { host: 0, srflx: 0, relay: 0, prflx: 0, other: 0 };
         let browserCallerIceStats = { host: 0, srflx: 0, relay: 0, prflx: 0, other: 0 };
-        let videoInfoTimer = null;
         let statsTimer = null;
         let iceDiagTimer = null;
+        const telemetryEls = {
+            battery: document.getElementById("telemetryBattery"),
+            wifi: document.getElementById("telemetryWifi"),
+            age: document.getElementById("telemetryAge"),
+        };
+
+        function applyHostTelemetry(host) {
+            updateHostTelemetryUi(host, telemetryEls);
+        }
+
+        async function refreshHostTelemetryOnce() {
+            const { token: iceTok } = getIceConfigFromUi();
+            if (!iceTok) {
+                return;
+            }
+            try {
+                const host = await signalFetch(signalApiBase, getRoomPath(), ["host"], {
+                    iceToken: iceTok,
+                });
+                if (host && typeof host === "object") {
+                    applyHostTelemetry(host);
+                }
+            } catch (_) {}
+        }
 
         function parseIceCandidateTyp(candidateStr) {
             const m = String(candidateStr || "").match(/\btyp\s+(\w+)/i);
@@ -832,11 +887,13 @@
             }
         }
 
-        function sendDc(cmd) {
+        function sendDc(cmd, opts = {}) {
             if (dataChannel && dataChannel.readyState === "open") {
                 dataChannel.send(cmd);
-                log(`Sent: ${cmd}`);
-            } else {
+                if (!opts.quiet) {
+                    log(`Sent: ${cmd}`);
+                }
+            } else if (!opts.quiet) {
                 log("Control channel not open (ждите onopen или проверьте Pi сторону)", "error");
             }
         }
@@ -986,6 +1043,9 @@
                 try {
                     const ev = await signalWaitEvents(signalApiBase, roomPath, eventsSince, 25, iceTok);
                     eventsSince = ev.seq ?? eventsSince;
+                    if (ev.host) {
+                        applyHostTelemetry(ev.host);
+                    }
                     if (
                         !answerDone &&
                         offerWrittenForSession &&
@@ -1036,6 +1096,7 @@
                             }
                             scheduleAutoConnect("pi-waiting");
                         },
+                        onHostUpdate: applyHostTelemetry,
                     },
                 );
             } catch (e) {
@@ -1077,60 +1138,16 @@
             return n;
         }
 
-        function stopVideoInfoTimer() {
-            if (videoInfoTimer !== null) {
-                clearInterval(videoInfoTimer);
-                videoInfoTimer = null;
-            }
-        }
-
-        function startVideoOverlayUpdates() {
-            const video = document.getElementById("remoteVideo");
-            const info = document.getElementById("videoInfo");
-            stopVideoInfoTimer();
-            videoInfoTimer = setInterval(() => {
-                if (video.videoWidth > 0) {
-                    info.textContent = `${video.videoWidth}x${video.videoHeight} | ${Math.round(video.currentTime)}s`;
-                } else if (video.srcObject && video.srcObject.getVideoTracks().length) {
-                    const t = video.srcObject.getVideoTracks()[0];
-                    const st = t.readyState;
-                    const en = t.enabled && !t.muted;
-                    info.textContent = `No decoded frames yet (${st}${en ? "" : ", muted?"})`;
-                } else {
-                    info.textContent = "No stream";
-                }
-            }, 500);
-        }
-
-        function attachVideoDebugListeners(video) {
-            video.onloadedmetadata = () => {
-                log(`Video metadata: ${video.videoWidth}x${video.videoHeight}`, "success");
-                document.getElementById("videoInfo").textContent =
-                    video.videoWidth ? `${video.videoWidth}x${video.videoHeight}` : "Metadata (0×0?)";
-            };
-            video.onplaying = () => log("Video element playing", "success");
-            video.onwaiting = () => log("Video waiting (buffering)", "warn");
-            video.onstalled = () => log("Video stalled", "warn");
-            video.onerror = () => log("Video element error", "error");
-        }
-
         // Expose functions to global scope for inline handlers
         window.startConnection = startConnection;
         window.hangup = hangup;
         window.sendCmd = sendCmd;
-        window.sendRawCmd = sendRawCmd;
         window.saveWebrtcSettings = saveWebrtcSettings;
-        window.testIceConfig = testIceConfig;
 
         // ============================================================
         // Logging
         // ============================================================
-        function log(msg, level = "info") {
-            const el = document.getElementById("log");
-            const time = new Date().toLocaleTimeString();
-            el.innerHTML += `<div class="${level}">[${time}] ${msg}</div>`;
-            el.scrollTop = el.scrollHeight;
-        }
+        function log(_msg, _level = "info") {}
 
         function setStatus(text, cls) {
             const el = document.getElementById("status");
@@ -1151,11 +1168,6 @@
             setStatus("Connecting...", "connecting");
             document.getElementById("btnConnect").disabled = true;
             document.getElementById("btnDisconnect").disabled = false;
-            stopVideoInfoTimer();
-            const videoEl = document.getElementById("remoteVideo");
-            document.getElementById("videoInfo").textContent = "Connecting…";
-            attachVideoDebugListeners(videoEl);
-
             teardownSignalingListeners();
             resetPiCalleeIceStats();
             eventsSince = 0;
@@ -1309,8 +1321,6 @@
                         ? event.streams[0]
                         : new MediaStream([track]);
                 video.srcObject = stream;
-                document.getElementById("videoInfo").textContent = "Track attached, starting playback…";
-                startVideoOverlayUpdates();
                 if (typeof video.requestVideoFrameCallback === "function") {
                     video.requestVideoFrameCallback(() =>
                         log("Отрисован кадр в <video> (requestVideoFrameCallback)", "success"),
@@ -1392,7 +1402,6 @@
         // ============================================================
         async function hangup() {
             log("Disconnecting...", "warn");
-            stopVideoInfoTimer();
             stopStatsTimer();
             stopIceDiagTimer();
             teardownSignalingListeners();
@@ -1409,7 +1418,6 @@
             connectInProgress = false;
 
             document.getElementById("remoteVideo").srcObject = null;
-            document.getElementById("videoInfo").textContent = "No stream";
 
             const rp = lastSignalingRoomPath || getRoomPath();
             const { token: iceTok } = getIceConfigFromUi();
@@ -1428,30 +1436,41 @@
         // Commands via Data Channel
         // ============================================================
         function sendCmd(direction) {
-            sendDc(romeoDriveJson(direction));
+            sendDc(romeoDriveJson(direction), { quiet: true });
         }
 
-        function sendRawCmd() {
-            const input = document.getElementById("cmdInput");
-            const cmd = input.value.trim();
-            if (!cmd) return;
-            if (dataChannel && dataChannel.readyState === "open") {
-                dataChannel.send(cmd);
-                log(`Sent raw: ${cmd}`);
-                input.value = "";
+        function sendTurretDir(dir) {
+            if (dir) {
+                sendDc(romeoTurretSmoothJson(dir), { quiet: true });
             } else {
-                log("Data channel not open", "error");
+                sendDc(romeoTurretStopJson(), { quiet: true });
             }
         }
 
-        detachControlKeys = attachBrowserControlKeys((cmd) => sendDc(cmd));
+        detachControlKeys = attachBrowserControlKeys((cmd) => sendDc(cmd, { quiet: true }));
+
+        mountVirtualJoystick(document.getElementById("joyDrive"), {
+            mode: "drive",
+            onDir(dir) {
+                sendCmd(dir || "stop");
+            },
+        });
+        mountVirtualJoystick(document.getElementById("joyTurret"), {
+            mode: "turret",
+            onDir(dir) {
+                sendTurretDir(dir);
+            },
+        });
+
+        document.getElementById("btnHome")?.addEventListener("click", () => sendDc(romeoHomeJson()));
 
         ensureHostLaunchWatch();
         if (typeof window.__webrtcMarkReady === "function") {
             window.__webrtcMarkReady();
         }
         log(`VPS room: ${getRoomPath()} · signaling ${signalApiBase}`, "info");
-        log("Operator build: 2026-05-17 (VPS signaling, no Firebase)", "success");
+        log("Operator build: 2026-05-16 (telemetry)", "success");
+        void refreshHostTelemetryOnce();
         const qsBoot = new URLSearchParams(window.location.search);
         const autostartShare =
             qsBoot.has("autostart") ||

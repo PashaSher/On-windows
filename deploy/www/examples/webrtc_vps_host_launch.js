@@ -60,6 +60,9 @@ export function watchPiHostOnVps(apiBase, roomIdOrPath, onRelaunch, opts = {}) {
                 const ev = await signalWaitEvents(apiBase, roomIdOrPath, since, 25, iceToken);
                 since = ev.seq ?? since;
                 handleHost(ev.host);
+                if (ev.host && opts.onHostUpdate) {
+                    opts.onHostUpdate(ev.host);
+                }
                 if (ev.answer) {
                     /* answer handled by connect flow */
                 }

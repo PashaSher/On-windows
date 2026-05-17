@@ -29,6 +29,18 @@ export function romeoHomeJson() {
     return JSON.stringify({ action: "home" });
 }
 
+export function cameraZoomJson(op) {
+    return JSON.stringify({ action: "camera_zoom", op });
+}
+
+export function cameraPresetJson(preset) {
+    return JSON.stringify({ action: "camera_preset", preset });
+}
+
+export function cameraStatusJson() {
+    return JSON.stringify({ action: "camera_status" });
+}
+
 /**
  * @param {(cmd: string) => void} sendCommand
  * @returns {() => void} detach listeners
