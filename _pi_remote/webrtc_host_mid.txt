@@ -1,0 +1,81 @@
+﻿170:
+171:
+172:class WebRTCHost:
+173:    """
+174:    Main WebRTC host: creates peer connection, attaches H.264 video,
+175:    handles Data Channel commands for Romeo and camera control.
+176:    """
+177:
+178:    def __init__(
+179:        self,
+180:        firebase_cred: str,
+181:        firebase_db_url: str,
+182:        room_id: str,
+183:        width: int = 1280,
+184:        height: int = 720,
+185:        fps: float = 30.0,
+186:        bitrate: int = 4_000_000,
+187:        intra: int = 30,
+188:        profile: str | None = "baseline",
+189:        camera_extra_args: list[str] | None = None,
+190:        command_handler: Callable[[dict], dict] | None = None,
+191:        ice_config_url: str | None = None,
+192:        ice_config_token: str | None = None,
+193:        ice_merge_public_stun: bool = True,
+194:        ice_fetch_timeout_sec: float = 8.0,
+195:        ice_config_required: bool = False,
+196:        ice_turn_only: bool = False,
+197:    ) -> None:
+198:        self._firebase_cred = firebase_cred
+199:        self._firebase_db_url = firebase_db_url
+200:        self._room_id = room_id
+201:        self._command_handler = command_handler
+202:
+203:        self._video_width = width
+204:        self._video_height = height
+205:        self._video_fps = fps
+206:        self._video_bitrate = bitrate
+207:        self._video_intra = intra
+208:        self._video_profile = profile
+209:        self._camera_extra_args = camera_extra_args
+210:
+211:        self._ice_config_url = (ice_config_url or "").strip() or None
+212:        self._ice_config_token = ice_config_token if ice_config_token else None
+213:        self._ice_merge_public_stun = ice_merge_public_stun
+214:        self._ice_fetch_timeout_sec = ice_fetch_timeout_sec
+215:        self._ice_config_required = ice_config_required
+216:        self._ice_turn_only = ice_turn_only
+217:
+218:        self._video_track: H264CameraTrack | None = None
+219:        self._pc: RTCPeerConnection | None = None
+220:        self._signaling: FirebaseSignaling | None = None
+221:        self._running = False
+222:        self._host_session_id = 0
+223:
+224:    async def run(self) -> None:
+225:        """Main loop: create room, wait for offer, connect, stream."""
+226:        init_firebase(self._firebase_cred, self._firebase_db_url)
+227:        log.info(
+228:            "WebRTC: signaling ╨▓ Firebase ╤é╨╛╨╗╤î╨║╨╛ ╨▓ /rooms/%s/ ΓÇª "
+229:            "╨ÿ╨╝╤Å ╨║╨╛╨╝╨╜╨░╤é╤ï ╨ö╨₧╨¢╨û╨¥╨₧ ╨▒╤ï╤é╤î ╤é╨╡╨╝ ╨╢╨╡ ╨▓╨╛ ╨▓╤ü╤æ╨╝ ╨║╨╛╨┤╨╡ ╨▒╤Ç╨░╤â╨╖╨╡╤Ç╨░ (╨╕╨╜╨░╤ç╨╡ offer ╤â╨╣╨┤╤æ╤é ┬½╨▓ ╨┤╤Ç╤â╨│╤â╤Ä┬╗ ╨║╨╛╨╝╨╜╨░╤é╤â, answer ╨╜╨╡ ╨▓╨╡╤Ç╨╜╤æ╤é╤ü╤Å).",
+230:            self._room_id,
+231:        )
+232:        self._running = True
+233:        self._prev_ufrag: str | None = None
+234:        self._signaling = FirebaseSignaling(self._room_id)
+235:        launch_id = int(time.time() * 1000)
+236:        await self._signaling.reset_room_for_host_launch(launch_id)
+237:
+238:        while self._running:
+239:            if self._host_session_id > 0 and self._signaling:
+240:                await self._signaling.reset_room_for_retry(self._host_session_id)
+241:            try:
+242:                await self._session()
+243:            except asyncio.CancelledError:
+244:                break
+245:            except Exception:
+246:                log.exception("WebRTC session error")
+247:            finally:
+248:                await self._cleanup_session()
+249:
+250:            if self._running:

@@ -1,0 +1,14 @@
+{
+  "room": "pi-camera",
+  "iceConfigUrl": "/api/ice",
+  "iceConfigToken": "PASTE_ICE_CONFIG_TOKEN_FROM_VPS",
+  "firebase": {
+    "apiKey": "PASTE_FROM_FIREBASE_CONSOLE",
+    "authDomain": "bro-oppy.firebaseapp.com",
+    "databaseURL": "https://bro-oppy-default-rtdb.firebaseio.com",
+    "projectId": "bro-oppy",
+    "storageBucket": "bro-oppy.appspot.com",
+    "messagingSenderId": "PASTE",
+    "appId": "PASTE"
+  }
+}

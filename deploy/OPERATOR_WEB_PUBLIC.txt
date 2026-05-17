@@ -1,0 +1,71 @@
+Публикация WebRTC-оператора по ссылке (Hetzner VPS)
+===============================================
+
+Локальный http://127.0.0.1:8765 — только на вашем ПК.
+Публичная ссылка — статика на VPS + (желательно) домен и HTTPS.
+
+Схема
+-----
+  https://ВАШ_ДОМЕН/webrtc-client.html
+       |-- Firebase (сигналинг) — уже в облаке
+       +-- /api/ice на том же VPS (nginx → ice-config-server :8788)
+
+Шаг 1 — собрать файлы на Windows
+--------------------------------
+  cd c:\projects\On-windows
+  powershell -File .\scripts\build_operator_web_bundle.ps1
+
+  Появится папка deploy\www\ (html + examples/*.js + webrtc.firebase.local.js).
+
+  Проверьте webrtc.firebase.local.js — реальные ключи Firebase (как на Pi).
+
+Шаг 2 — залить на VPS
+---------------------
+  scp -r deploy\www\* root@116.203.148.254:/var/www/operator/
+
+  На VPS:
+    sudo mkdir -p /var/www/operator
+    sudo chown -R www-data:www-data /var/www/operator
+
+Шаг 3 — nginx
+-------------
+  sudo cp /root/project/deploy/nginx/operator-web.conf.example \
+          /etc/nginx/sites-available/operator-web
+  # отредактируйте server_name (IP или домен)
+  sudo ln -sf /etc/nginx/sites-available/operator-web /etc/nginx/sites-enabled/
+  sudo nginx -t && sudo systemctl reload nginx
+
+Шаг 4 — HTTPS (рекомендуется)
+-----------------------------
+  sudo apt install certbot python3-certbot-nginx
+  sudo certbot --nginx -d ваш-домен.example.com
+
+  В браузере ICE URL: https://ваш-домен.example.com/api/ice
+  Token — в поле на странице или в ссылке ?iceToken=...
+
+Ссылки для пользователей
+------------------------
+  Проверка связи (без JavaScript):
+    http://116.203.148.254/ping.html
+
+  Обычный режим:
+    http://116.203.148.254/webrtc-client.html?room=pi-camera&iceToken=ТОКЕН
+
+  Если порт 80 блокирует провайдер / открывается только https:
+    http://116.203.148.254:8788/webrtc-client.html?room=pi-camera&iceToken=ТОКЕН
+    https://116.203.148.254/webrtc-client.html  (самоподписанный сертификат — «Дополнительно» → перейти)
+
+  Hetzner-only (debug):
+    http://116.203.148.254/webrtc-client.html?profile=hetzner-relay-only&room=pi-camera&iceToken=ТОКЕН
+
+  Важно: http:// а не https:// если сертификат не настроен (кроме ссылки выше с :443).
+
+Важно
+-----
+  - Не публикуйте iceToken в открытых чатах; лучше раздать ссылку с token только доверенным.
+  - Firebase Rules: ограничьте запись в rooms/ (см. cloud/FIREBASE_RULES_EXAMPLE.txt).
+  - Порт 8768 ice-config-server должен слушать 127.0.0.1; снаружи только nginx /api/ice.
+
+Обновление
+----------
+  build_operator_web_bundle.ps1 → scp → готово (Ctrl+F5 у пользователей).

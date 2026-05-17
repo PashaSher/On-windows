@@ -1,0 +1,2820 @@
+﻿=====FILE /home/pavel/projects/Mobile_Raspberry_5-/stream_camera.py =====
+#!/usr/bin/env python3
+"""
+╨ó╨╛╤ç╨║╨░ ╨▓╤à╨╛╨┤╨░ (╨║╨░╨║ ╤Ç╨░╨╜╤î╤ê╨╡): ``python stream_camera.py <╨║╨╛╨╝╨░╨╜╨┤╨░>``.
+
+╨á╨╡╨░╨╗╨╕╨╖╨░╤å╨╕╤Å ╤Ç╨░╨╖╨╜╨╡╤ü╨╡╨╜╨░ ╨┐╨╛ ╨┐╨░╨║╨╡╤é╤â ``rpi_tools/``:
+
+- ``rpi_tools/camera_stream.py`` ΓÇö ╨║╨░╨╝╨╡╤Ç╨░, UDP/H.264, RTSP/H.264 ╨╕ H.264/TCP ╨┐╤â╤é╨╕, legacy JPEG/MJPEG ╨┐╨╛ TCP, UDP discovery, ``send``.
+- ``rpi_tools/romeo_usb.py`` ΓÇö USB Romeo: ╨┐╤Ç╨╛╤ê╨╕╨▓╨║╨░ (bootloader), ``serial-send``, ``adc-read`` / ``adc-cal`` (╨É╨ª╨ƒ, VCC/VREF).
+- ``rpi_tools/romeo_control_server.py`` ΓÇö TCP ╤ü ╨ƒ╨Ü ΓåÆ ╤ü╤é╤Ç╨╛╨║╨╕ ╨╜╨░ Romeo (╨┐╤Ç╨╕ ``send --listen``).
+- ``rpi_tools/wifi_scan.py`` ΓÇö ``wifi-scan`` (nmcli).
+- ``rpi_tools/discovery.py`` ΓÇö ╨┐╤Ç╨╛╤é╨╛╨║╨╛╨╗ UDP handshake.
+- ``rpi_tools/config.py`` ΓÇö ``ROMEO_USB_PORT``, ╨┐╤â╤é╨╕ ╨║ ``scripts/``, ╨║╨╛╨╜╤ü╤é╨░╨╜╤é╤ï discovery.
+
+- ``rpi_tools/boot_gpio_gate.py`` ΓÇö ╨┐╤Ç╨╕ ╤ü╤é╨░╤Ç╤é╨╡ Pi: ╨╡╤ü╨╗╨╕ GPIO (BCM) ╨╜╨░ ╨╖╨╡╨╝╨╗╨╡ ΓåÆ ``exec`` ╤ü╤é╤Ç╨╕╨╝╨░, ╨╕╨╜╨░╤ç╨╡ ╨▓╤ï╤à╨╛╨┤ ╨▒╨╡╨╖ ╨╖╨░╨┐╤â╤ü╨║╨░ (╤ü╨╝. ``scripts/camstream-gpio-gate.service.example``).
+
+╨ö╨╛╨║╤â╨╝╨╡╨╜╤é╨░╤å╨╕╤Å: ╨║╨╗╨╕╨╡╨╜╤é ╨╜╨░ ╨ƒ╨Ü ΓÇö ``docs/pc-remote-control.ru.md``; ╨║╨░╤ç╨╡╤ü╤é╨▓╨╛ ╨▓╨╕╨┤╨╡╨╛ ╨╜╨░ Pi (H.264/JPEG, ╨▒╨╕╤é╤Ç╨╡╨╣╤é, ╤Ç╨░╨╖╤Ç╨╡╤ê╨╡╨╜╨╕╨╡) ΓÇö ``docs/pi-stream-quality.ru.md``.
+
+╨ƒ╤Ç╨╕╨╝╨╡╤Ç╤ï:
+
+  python stream_camera.py send --listen
+  # ╨ƒ╤Ç╨╕ --listen ╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä TCP :5001 ╨┐╤Ç╨╕╨╜╨╕╨╝╨░╨╡╤é ╨║╨╛╨╝╨░╨╜╨┤╤ï Romeo ╤ü ╨ƒ╨Ü (╤ü╨╝. --romeo-control-port).
+  python stream_camera.py send --listen --stream-preset cinema
+  python stream_camera.py send --video-mode udp_h264 --host 10.42.0.2 --port 5000 --stream-preset realtime
+  python stream_camera.py send --ap-ssid 12345 --ap-force --video-mode udp_h264 --host 10.42.0.194 --port 5000 --stream-preset realtime
+  python stream_camera.py send --listen --video-mode jpeg_tcp --port 5000 --no-set-fps
+  python stream_camera.py serial-send
+  python stream_camera.py romeo
+  python stream_camera.py flash-romeo
+  python stream_camera.py firebase-probe --firebase-cred bro-oppy-firebase-adminsdk-fbsvc-ΓÇª.json
+  python stream_camera.py webrtc --firebase-cred ΓÇª --firebase-db-url https://PROJECT-default-rtdb.firebaseio.com
+  # ╨Æ╨╜╨╡ ╨┤╨╛╨╝╨░╤ê╨╜╨╡╨╣ ╤ü╨╡╤é╨╕ (TURN ╨╜╨░ VPS): ICE_CONFIG_* ╨╕╨╗╨╕ --ice-config-url / --ice-config-token (config/webrtc.ice.env.example).
+  # ╨₧╤é╨╗╨░╨┤╨║╨░ ╤é╨╛╨╗╤î╨║╨╛ ╤ç╨╡╤Ç╨╡╨╖ Hetzner relay: webrtc ΓÇª --ice-vps-only (Run and Debug: ┬½webrtc via Hetzner only┬╗).
+  # ╨Ü╨╛╨╝╨╜╨░╤é╨░ RTDB ╨┤╨╗╤Å WebRTC ╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä: pi-camera (╤ü╨╝. examples/WEBRTC_ROOM_pi-camera.txt ╨╕ examples/rtdb_room_pi_camera.js)
+  python stream_camera.py wifi-scan
+  python stream_camera.py wifi-connect "╨ÿ╨╝╤Å╨í╨╡╤é╨╕" --password-file ~/wifi.key
+  # ╨╕╨╗╨╕: export RPI_WIFI_PASSWORD='...' && python stream_camera.py wifi-connect "╨ÿ╨╝╤Å╨í╨╡╤é╨╕"
+
+╨í╨╛╤à╤Ç╨░╨╜╤æ╨╜╨╜╤ï╨╡ ╨╜╨░╤ü╤é╤Ç╨╛╨╣╨║╨╕ ╨▓ ╨┐╤Ç╨╛╨╡╨║╤é╨╡ (╤ä╨░╨╣╨╗ ╨▓ .gitignore, ╤ê╨░╨▒╨╗╨╛╨╜ ╨▓ ╤Ç╨╡╨┐╨╛╨╖╨╕╤é╨╛╤Ç╨╕╨╕):
+  cp config/wifi.local.env.example config/wifi.local.env
+  # ╨╛╤é╤Ç╨╡╨┤╨░╨║╤é╨╕╤Ç╤â╨╣╤é╨╡ wifi.local.env, ╨┐╨░╤Ç╨╛╨╗╤î ╨╗╤â╤ç╤ê╨╡ ╨▓ ╨╛╤é╨┤╨╡╨╗╤î╨╜╨╛╨╝ ╤ä╨░╨╣╨╗╨╡ ╤ü chmod 600
+  python stream_camera.py wifi-apply
+  ./scripts/wifi_apply.sh
+
+╨ó╨╛ ╨╢╨╡ ╤ç╨╡╤Ç╨╡╨╖ ╨╝╨╛╨┤╤â╨╗╤î: ``python -m rpi_tools.cli ...``
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+
+from rpi_tools.cli import main
+from rpi_tools.config import ROMEO_USB_PORT
+
+__all__ = ["main", "ROMEO_USB_PORT"]
+
+if __name__ == "__main__":
+    _rc = main()
+    if _rc:
+        # os._exit: ╨▒╨╡╨╖ SystemExit ΓÇö ╨╕╨╜╨░╤ç╨╡ debugpy ╨╜╨░ Python 3.13 ╤ç╨░╤ü╤é╨╛ ╨┤╨░╤æ╤é IndexError ╨▓ traceback.format
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(int(_rc))
+
+=====FILE /home/pavel/projects/Mobile_Raspberry_5-/rpi_tools/webrtc_signaling.py =====
+"""Firebase Realtime Database signaling ╨┤╨╗╤Å WebRTC ╨╜╨░ Raspberry Pi."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import threading
+from typing import Any, Callable
+
+import firebase_admin
+from firebase_admin import credentials, db as rtdb
+
+log = logging.getLogger("camstream.webrtc")
+
+_app_initialized = False
+_app_lock = threading.Lock()
+
+
+def init_firebase(cred_path: str, database_url: str) -> None:
+    """Initialize Firebase Admin SDK (idempotent).
+
+    ╨ò╤ü╨╗╨╕ ╨┐╤Ç╨╕╨╗╨╛╨╢╨╡╨╜╨╕╨╡ ╤â╨╢╨╡ ╨╕╨╜╨╕╤å╨╕╨░╨╗╨╕╨╖╨╕╤Ç╨╛╨▓╨░╨╜╨╛ ╨┤╤Ç╤â╨│╨╕╨╝ ╨╝╨╛╨┤╤â╨╗╨╡╨╝, ╨┐╨╛╨▓╤é╨╛╤Ç╨╜╨░╤Å ╨╕╨╜╨╕╤å╨╕╨░╨╗╨╕╨╖╨░╤å╨╕╤Å ╨╜╨╡
+    ╨▓╤ï╨┐╨╛╨╗╨╜╤Å╨╡╤é╤ü╤Å; ╨┐╤Ç╨╕ ╨╜╨╡╤ü╨╛╨▓╨┐╨░╨┤╨╡╨╜╨╕╨╕ databaseURL ╨┐╨╕╤ê╨╡╤é╤ü╤Å ╨┐╤Ç╨╡╨┤╤â╨┐╤Ç╨╡╨╢╨┤╨╡╨╜╨╕╨╡.
+    """
+    global _app_initialized
+    with _app_lock:
+        if _app_initialized:
+            try:
+                app = firebase_admin.get_app()
+                existing = (app.options or {}).get("databaseURL")
+                if existing and existing.rstrip("/") != database_url.rstrip("/"):
+                    log.warning(
+                        "Firebase: ╨┐╤Ç╨╕╨╗╨╛╨╢╨╡╨╜╨╕╨╡ ╤â╨╢╨╡ ╤ü databaseURL=%s; ╨╖╨░╨┐╤Ç╨╛╤ê╨╡╨╜ %s ΓÇö "
+                        "╨╖╨░╨┐╨╕╤ü╤î ╨┐╨╛╨╣╨┤╤æ╤é ╨▓ ╨┐╨╡╤Ç╨▓╤ï╨╣ URL. ╨ƒ╨╡╤Ç╨╡╨╖╨░╨┐╤â╤ü╤é╨╕╤é╨╡ ╨┐╤Ç╨╛╤å╨╡╤ü╤ü ╤ü ╨╛╨┤╨╜╨╕╨╝ URL.",
+                        existing,
+                        database_url,
+                    )
+            except ValueError:
+                pass
+            return
+        cred = credentials.Certificate(cred_path)
+        firebase_admin.initialize_app(cred, {"databaseURL": database_url})
+        _app_initialized = True
+        log.info("Firebase: initialized (db=%s)", database_url)
+
+
+class FirebaseSignaling:
+    """
+    WebRTC signaling through Firebase Realtime Database.
+
+    DB structure::
+
+        /rooms/{room_id}/
+            offer        ΓÇö SDP offer (JSON string, written by client)
+            answer       ΓÇö SDP answer (JSON string, written by Pi)
+            callerCandidates / calleeCandidates ΓÇö ICE (╨╕╨╝╨╡╨╜╨░ ╨┤╨╗╤Å ╤ü╨╛╨▓╨╝╨╡╤ü╤é╨╕╨╝╨╛╤ü╤é╨╕ ╤ü ╨║╨╗╨╕╨╡╨╜╤é╨╛╨╝)
+            status       ΓÇö "waiting" | "negotiating" | "connected" | "closed"
+            hostLaunchId ΓÇö ╨╝╨╡╨╜╤Å╨╡╤é╤ü╤Å ╨┐╤Ç╨╕ ╨║╨░╨╢╨┤╨╛╨╝ ╨╖╨░╨┐╤â╤ü╨║╨╡ stream_camera webrtc ╨╜╨░ Pi
+            hostSessionId ΓÇö +1 ╨┐╤Ç╨╕ ╨║╨░╨╢╨┤╨╛╨╝ ╨╜╨╛╨▓╨╛╨╝ ╤å╨╕╨║╨╗╨╡ ╨╛╨╢╨╕╨┤╨░╨╜╨╕╤Å offer ╨╜╨░ Pi (╨┐╨╛╤ü╨╗╨╡ ╨╛╨▒╤Ç╤ï╨▓╨░ ICE)
+            needOffer      ΓÇö true: ╨▒╤Ç╨░╤â╨╖╨╡╤Ç╤â ╨╜╤â╨╢╨╡╨╜ ╨╜╨╛╨▓╤ï╨╣ Connect / offer
+    """
+
+    def __init__(self, room_id: str) -> None:
+        self._room_id = room_id
+        self._base_ref = rtdb.reference(f"/rooms/{room_id}")
+        self._listeners: list[Any] = []
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    @property
+    def room_id(self) -> str:
+        return self._room_id
+
+    def _bind_loop(self) -> asyncio.AbstractEventLoop:
+        loop = asyncio.get_event_loop()
+        self._loop = loop
+        return loop
+
+    def _delete_room_children(self, base: Any, names: tuple[str, ...]) -> None:
+        for name in names:
+            try:
+                base.child(name).delete()
+            except Exception as e:
+                log.debug(
+                    "Firebase: room %r child %s delete: %s",
+                    self._room_id,
+                    name,
+                    e,
+                )
+
+    async def reset_room_for_host_launch(self, launch_id: int) -> None:
+        """╨ƒ╨╛╨╗╨╜╤ï╨╣ ╤ü╨▒╤Ç╨╛╤ü ╨║╨╛╨╝╨╜╨░╤é╤ï ╨┐╤Ç╨╕ ╨║╨░╨╢╨┤╨╛╨╝ ╨╖╨░╨┐╤â╤ü╨║╨╡ webrtc ╨╜╨░ Pi (╨╜╨╛╨▓╤ï╨╣ hostLaunchId)."""
+        loop = self._bind_loop()
+
+        def _reset() -> None:
+            base = self._base_ref
+            self._delete_room_children(
+                base,
+                ("offer", "answer", "callerCandidates", "calleeCandidates"),
+            )
+            base.update({
+                "status": "waiting",
+                "hostLaunchId": launch_id,
+                "hostSessionId": 0,
+                "needOffer": True,
+            })
+
+        await loop.run_in_executor(None, _reset)
+        log.info(
+            "Firebase: ╨║╨╛╨╝╨╜╨░╤é╨░ %r ΓÇö ╨╜╨╛╨▓╤ï╨╣ ╨╖╨░╨┐╤â╤ü╨║ Pi (hostLaunchId=%s). "
+            "╨Æ ╨▒╤Ç╨░╤â╨╖╨╡╤Ç╨╡ ╤ü╨╜╨╛╨▓╨░ Connect ╨┐╨╛╤ü╨╗╨╡ ╤ü╤é╨░╤Ç╤é╨░ ╨┐╤Ç╨╛╨│╤Ç╨░╨╝╨╝╤ï.",
+            self._room_id,
+            launch_id,
+        )
+
+    async def reset_room_for_retry(self, session_id: int) -> None:
+        """╨¥╨╛╨▓╤ï╨╣ ╤å╨╕╨║╨╗ ╨┐╨╛╤ü╨╗╨╡ ╨╛╨▒╤Ç╤ï╨▓╨░ ICE ╨▓ ╤é╨╛╨╝ ╨╢╨╡ ╨┐╤Ç╨╛╤å╨╡╤ü╤ü╨╡ ΓÇö ╨╜╤â╨╢╨╡╨╜ ╤ü╨▓╨╡╨╢╨╕╨╣ offer ╨▓ ╨▒╤Ç╨░╤â╨╖╨╡╤Ç╨╡."""
+        loop = self._bind_loop()
+
+        def _reset() -> None:
+            base = self._base_ref
+            self._delete_room_children(
+                base,
+                ("offer", "answer", "callerCandidates", "calleeCandidates"),
+            )
+            base.update({
+                "status": "waiting",
+                "hostSessionId": session_id,
+                "needOffer": True,
+            })
+
+        await loop.run_in_executor(None, _reset)
+        log.info(
+            "Firebase: ╨║╨╛╨╝╨╜╨░╤é╨░ %r ΓÇö ╤å╨╕╨║╨╗ %s (hostSessionId), needOffer=true",
+            self._room_id,
+            session_id,
+        )
+
+    async def create_room(self, *, clear_offer: bool = True) -> None:
+        """╨ú╤ü╤é╨░╤Ç╨╡╨▓╤ê╨╕╨╣ ╤ü╨▒╤Ç╨╛╤ü; ╨┐╤Ç╨╡╨┤╨┐╨╛╤ç╤é╨╕╤é╨╡╨╗╤î╨╜╨╛ reset_room_for_host_launch / reset_room_for_retry."""
+        loop = self._bind_loop()
+
+        def _reset() -> None:
+            base = self._base_ref
+            self._delete_room_children(
+                base,
+                ("answer", "calleeCandidates", "callerCandidates"),
+            )
+            if clear_offer:
+                self._delete_room_children(base, ("offer",))
+            base.child("status").set("waiting")
+            base.child("needOffer").set(True)
+
+        await loop.run_in_executor(None, _reset)
+        log.info(
+            "Firebase: ╨║╨╛╨╝╨╜╨░╤é╨░ %r create_room(clear_offer=%s) ΓÇö ╨╗╤â╤ç╤ê╨╡ reset_room_for_*",
+            self._room_id,
+            clear_offer,
+        )
+
+    async def wait_for_offer(self, prev_ufrag: str | None = None) -> dict:
+        """╨ƒ╨╛╨╗╤â╤ç╨╕╤é╤î SDP offer: ╤ü╨╜╨░╤ç╨░╨╗╨░ ╤â╨╢╨╡ ╨╗╨╡╨╢╨░╤ë╨╕╨╣ ╨▓ RTDB, ╨╕╨╜╨░╤ç╨╡ ╤ü╨╗╤â╤ê╨░╤é╤î ╨╕╨╖╨╝╨╡╨╜╨╡╨╜╨╕╤Å."""
+        loop = asyncio.get_event_loop()
+        offer_ref = self._base_ref.child("offer")
+
+        def _extract_ufrag(sdp: str) -> str | None:
+            for line in sdp.splitlines():
+                if line.startswith("a=ice-ufrag:"):
+                    return line.split(":", 1)[1].strip()
+            return None
+
+        def _coerce_offer(data: Any) -> dict | None:
+            if data is None:
+                return None
+            if isinstance(data, str):
+                try:
+                    data = json.loads(data)
+                except json.JSONDecodeError:
+                    return None
+            if not isinstance(data, dict) or "sdp" not in data:
+                return None
+            return data
+
+        snap = await loop.run_in_executor(None, offer_ref.get)
+        existing = _coerce_offer(snap)
+        if existing:
+            ufrag0 = _extract_ufrag(existing.get("sdp", ""))
+            if not (prev_ufrag and ufrag0 == prev_ufrag):
+                self._last_ufrag = ufrag0
+                log.info(
+                    "Firebase: offer ╤â╨╢╨╡ ╨▓ RTDB (type=%s, ufrag=%s)",
+                    existing.get("type", "?"),
+                    ufrag0,
+                )
+                return existing
+
+        offer_future: asyncio.Future[dict] = loop.create_future()
+
+        def _on_offer(event: Any) -> None:
+            data = event.data
+            coerced = _coerce_offer(data)
+            if not coerced:
+                return
+            ufrag = _extract_ufrag(coerced.get("sdp", ""))
+            if prev_ufrag and ufrag == prev_ufrag:
+                return
+            if not offer_future.done():
+                loop.call_soon_threadsafe(offer_future.set_result, coerced)
+
+        listener = offer_ref.listen(_on_offer)
+        self._listeners.append(listener)
+
+        log.info("Firebase: listening for offer on /rooms/%s/offer", self._room_id)
+        offer = await offer_future
+        listener.close()
+        self._listeners.remove(listener)
+
+        ufrag = _extract_ufrag(offer.get("sdp", ""))
+        log.info(
+            "Firebase: received offer (type=%s, ufrag=%s)",
+            offer.get("type", "?"),
+            ufrag,
+        )
+        self._last_ufrag = ufrag
+        return offer
+
+    @property
+    def last_ufrag(self) -> str | None:
+        return getattr(self, "_last_ufrag", None)
+
+    async def send_answer(self, answer: dict) -> None:
+        """Write SDP answer; status=negotiating, needOffer=false."""
+        loop = asyncio.get_event_loop()
+
+        def _write() -> None:
+            self._base_ref.child("answer").set(answer)
+            self._base_ref.update({
+                "status": "negotiating",
+                "needOffer": False,
+            })
+
+        await loop.run_in_executor(None, _write)
+        log.info("Firebase: answer sent (status=negotiating, needOffer=false)")
+
+    async def mark_failed_need_reconnect(self) -> None:
+        """ICE/PC ╨╛╨▒╨╛╤Ç╨▓╨░╨╗╨╕╤ü╤î: ╤â╨▒╤Ç╨░╤é╤î ╤â╤ü╤é╨░╤Ç╨╡╨▓╤ê╨╕╨╣ answer, ╤ü╨╜╨╛╨▓╨░ ╨╢╨┤╤æ╨╝ Connect ╨▓ ╨▒╤Ç╨░╤â╨╖╨╡╤Ç╨╡."""
+        loop = self._bind_loop()
+
+        def _mark() -> None:
+            base = self._base_ref
+            self._delete_room_children(base, ("answer", "calleeCandidates"))
+            base.update({
+                "status": "waiting",
+                "needOffer": True,
+            })
+
+        await loop.run_in_executor(None, _mark)
+        log.info(
+            "Firebase: ╤ü╨╡╤ü╤ü╨╕╤Å ╨╜╨╡ ╤â╤ü╤é╨░╨╜╨╛╨▓╨╕╨╗╨░╤ü╤î ΓÇö answer ╤ü╨╜╤Å╤é, needOffer=true, status=waiting"
+        )
+
+    async def send_ice_candidate(self, candidate: dict) -> None:
+        """Push a local ICE candidate to Firebase (calleeCandidates for compatibility)."""
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None, self._base_ref.child("calleeCandidates").push, candidate
+        )
+
+    def listen_remote_candidates(
+        self, callback: Callable[[dict], None]
+    ) -> None:
+        """Start listening for remote ICE candidates from the client (callerCandidates)."""
+        loop = self._loop or asyncio.get_event_loop()
+
+        def _dispatch(data: Any) -> None:
+            if data is None:
+                return
+            if isinstance(data, str):
+                try:
+                    data = json.loads(data)
+                except json.JSONDecodeError:
+                    return
+            if isinstance(data, dict):
+                if "candidate" in data:
+                    log.debug("Firebase: got ICE candidate (listener)")
+                    loop.call_soon_threadsafe(callback, data)
+                else:
+                    for v in data.values():
+                        if isinstance(v, dict) and "candidate" in v:
+                            log.debug("Firebase: got ICE candidate (listener/bulk)")
+                            loop.call_soon_threadsafe(callback, v)
+
+        def _on_candidate(event: Any) -> None:
+            log.debug("Firebase: callerCandidates event path=%s data_type=%s",
+                       getattr(event, 'path', '?'), type(event.data).__name__)
+            _dispatch(event.data)
+
+        ref = self._base_ref.child("callerCandidates")
+        listener = ref.listen(_on_candidate)
+        self._listeners.append(listener)
+        log.info("Firebase: listening for remote ICE candidates (callerCandidates)")
+
+    async def poll_remote_candidates(self) -> list[dict]:
+        """Directly read callerCandidates from Firebase (fallback for listener)."""
+        loop = asyncio.get_event_loop()
+        data = await loop.run_in_executor(
+            None, self._base_ref.child("callerCandidates").get
+        )
+        if not data or not isinstance(data, dict):
+            return []
+        candidates = []
+        for v in data.values():
+            if isinstance(v, dict) and "candidate" in v:
+                candidates.append(v)
+        return candidates
+
+    async def set_status(self, status: str) -> None:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None, self._base_ref.child("status").set, status
+        )
+
+    async def cleanup(self) -> None:
+        """Close listeners with a timeout to avoid blocking."""
+        loop = asyncio.get_event_loop()
+
+        def _close_all() -> None:
+            for listener in self._listeners:
+                try:
+                    listener.close()
+                except Exception:
+                    pass
+            self._listeners.clear()
+
+        try:
+            await asyncio.wait_for(
+                loop.run_in_executor(None, _close_all),
+                timeout=5.0,
+            )
+        except asyncio.TimeoutError:
+            log.warning("Firebase: listener cleanup timed out (5s)")
+            self._listeners.clear()
+        log.info("Firebase: listeners for room '%s' closed", self._room_id)
+
+=====FILE /home/pavel/projects/Mobile_Raspberry_5-/rpi_tools/webrtc_host.py =====
+"""WebRTC Host ╨╜╨░ Raspberry Pi: peer connection, video track, Data Channel ╤â╨┐╤Ç╨░╨▓╨╗╨╡╨╜╨╕╤Å."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import signal
+import time
+from typing import TYPE_CHECKING, Callable
+
+if TYPE_CHECKING:
+    from aiortc import RTCIceCandidate, RTCPeerConnection
+
+    from rpi_tools.webrtc_video import H264CameraTrack
+
+from rpi_tools.webrtc_signaling import FirebaseSignaling, init_firebase
+
+log = logging.getLogger("camstream.webrtc")
+
+# ╨ƒ╤â╨▒╨╗╨╕╤ç╨╜╤ï╨╣ STUN: ╨┐╨╛╨╝╨╛╨│╨░╨╡╤é Windows/Chrome ╨▓╤ï╨┤╨░╤é╤î ╨╜╨╛╤Ç╨╝╨░╨╗╤î╨╜╤ï╨╡ srflx-╨║╨░╨╜╨┤╨╕╨┤╨░╤é╤ï, ╨╜╨╡ ╤é╨╛╨╗╤î╨║╨╛ 127.0.0.1.
+STUN_SERVERS: list[str] = ["stun:stun.l.google.com:19302"]
+
+
+def _pref_video_codec_preferences_for_answer() -> list:
+    """╨ƒ╤Ç╨╕╨╛╤Ç╨╕╤é╨╡╤é H.264 baseline (42001f) ΓÇö ╤ç╨░╤ë╨╡ ╨┤╨╡╨║╨╛╨┤╨╕╤Ç╤â╨╡╤é╤ü╤Å ╨▓ Chrome/Edge ╨▒╨╡╨╖ ┬½╤é╨╕╤ê╨╕╨╜╤ï┬╗ ╨╜╨░ ╨┐╤Ç╨╕╤æ╨╝╨╡."""
+    from aiortc.codecs import get_capabilities
+
+    caps = list(get_capabilities("video").codecs)
+
+    def _pid(c):
+        return (c.parameters or {}).get("profile-level-id", "")
+
+    def _sort_key(c: object) -> tuple:
+        p = _pid(c)
+        if p == "42001f":
+            tier = 0
+        elif p == "42e01f":
+            tier = 1
+        else:
+            tier = 2
+        return (tier, p)
+
+    h264_sorted = sorted(
+        [c for c in caps if getattr(c, "mimeType", "") == "video/H264"],
+        key=_sort_key,
+    )
+    vp8 = [c for c in caps if getattr(c, "name", "") == "VP8"]
+    return [*h264_sorted, *vp8]
+
+
+def _parse_ice_candidate(data: dict) -> RTCIceCandidate | None:
+    """╨á╨░╨╖╨▒╨╛╤Ç ICE ╨╕╨╖ JSON ╨▒╤Ç╨░╤â╨╖╨╡╤Ç╨░ (Chrome/Firefox) ╨┤╨╗╤Å aiortc.addIceCandidate.
+
+    ╨ÿ╤ü╨┐╨╛╨╗╤î╨╖╤â╨╡╨╝ candidate_from_sdp ╨╕╨╖ aiortc ΓÇö ╨║╨╛╤Ç╤Ç╨╡╨║╤é╨╜╨╡╨╡ ╤Ç╤â╤ç╨╜╨╛╨│╨╛ split() ╨┤╨╗╤Å ╤ç╨░╤ü╤é╨╕ ╤ü╤é╤Ç╨╛╨║.
+    """
+    from aiortc.sdp import candidate_from_sdp
+
+    raw = data.get("candidate", "")
+    sdp_mid = data.get("sdpMid")
+    sdp_mline_index = data.get("sdpMLineIndex")
+    if not raw or raw == "":
+        return None
+
+    try:
+        candidate = candidate_from_sdp(raw)
+    except Exception as e:
+        log.debug("ICE: ╤Ç╨░╨╖╨▒╨╛╤Ç ╤ç╨╡╤Ç╨╡╨╖ candidate_from_sdp ╨╜╨╡ ╤â╨┤╨░╨╗╤ü╤Å (%s): %.120sΓÇª", e, raw)
+        return None
+
+    candidate.sdpMid = sdp_mid
+    candidate.sdpMLineIndex = sdp_mline_index
+
+    ip = candidate.ip or ""
+    try:
+        port = int(candidate.port)
+    except (TypeError, ValueError):
+        return None
+
+    if ip.startswith("169.254."):
+        log.debug("ICE: ╨┐╤Ç╨╛╨┐╤â╤ü╨║ link-local ╨║╨░╨╜╨┤╨╕╨┤╨░╤é╨░ %s:%s", ip, port)
+        return None
+    if port == 9:
+        log.debug("ICE: ╨┐╤Ç╨╛╨┐╤â╤ü╨║ ╨┐╨╛╤Ç╤é╨░ 9 ╨┤╨╗╤Å %s", ip)
+        return None
+
+    return candidate
+
+
+def _ice_candidates_from_sdp(sdp: str) -> list[dict]:
+    """ICE ╨╕╨╖ a=candidate: ╨▓ SDP ╤ü sdpMid / sdpMLineIndex ╨┐╨╛ ╤ü╨╡╨║╤å╨╕╤Å╨╝ m=."""
+    out: list[dict] = []
+    mid = "0"
+    mline_index = -1
+    for line in (sdp or "").splitlines():
+        line = line.strip()
+        if line.startswith("m="):
+            mline_index += 1
+            mid = str(mline_index)
+        elif line.startswith("a=mid:"):
+            mid = line.split(":", 1)[1].strip()
+        elif line.startswith("a=candidate:"):
+            out.append({
+                "candidate": line[2:],
+                "sdpMid": mid,
+                "sdpMLineIndex": max(0, mline_index),
+            })
+    return out
+
+
+async def _publish_sdp_candidates_to_firebase(
+    signaling: FirebaseSignaling,
+    sdp: str,
+    *,
+    turn_only: bool = False,
+) -> int:
+    """╨ö╤â╨▒╨╗╨╕╤Ç╤â╨╡╤é ICE ╨╕╨╖ SDP ╨▓ calleeCandidates (╨┤╨╛ answer ΓÇö ╨▒╤Ç╨░╤â╨╖╨╡╤Ç ╨▓╨╕╨┤╨╕╤é relay ╤ü╤Ç╨░╨╖╤â)."""
+    n = 0
+    for ent in _ice_candidates_from_sdp(sdp):
+        cand = ent["candidate"]
+        typ = _ice_typ_from_sdp(cand)
+        if turn_only and typ != "relay":
+            continue
+        await signaling.send_ice_candidate(ent)
+        n += 1
+    if n:
+        log.info(
+            "WebRTC: SDP ΓåÆ Firebase calleeCandidates: %d%s",
+            n,
+            " (╤é╨╛╨╗╤î╨║╨╛ relay)" if turn_only else "",
+        )
+    elif turn_only:
+        log.warning(
+            "WebRTC: ╨▓ SDP answer ╨╜╨╡╤é typ relay ΓÇö Hetzner-only ╨▓ ╨▒╤Ç╨░╤â╨╖╨╡╤Ç╨╡ ╨╜╨╡ ╨┐╨╛╨┤╨║╨╗╤Ä╤ç╨╕╤é╤ü╤Å"
+        )
+    return n
+
+
+def _ice_typ_from_sdp(sdp_line: str) -> str:
+    """typ host|srflx|relay ╨╕╨╖ SDP candidate line."""
+    parts = (sdp_line or "").split()
+    for i, part in enumerate(parts):
+        if part == "typ" and i + 1 < len(parts):
+            return parts[i + 1]
+    return "?"
+
+
+async def _wait_ice_gathering_complete(pc: RTCPeerConnection, timeout_sec: float = 15.0) -> str:
+    """╨û╨┤╤æ╨╝ relay/host ╨║╨░╨╜╨┤╨╕╨┤╨░╤é╤ï ╨┐╨╡╤Ç╨╡╨┤ ╨╛╤é╨┐╤Ç╨░╨▓╨║╨╛╨╣ answer (╨▓╨░╨╢╨╜╨╛ ╨┤╨╗╤Å TURN-only ╨▓ ╨▒╤Ç╨░╤â╨╖╨╡╤Ç╨╡)."""
+    state = pc.iceGatheringState
+    if state == "complete":
+        return state
+
+    done = asyncio.Event()
+
+    @pc.on("icegatheringstatechange")
+    async def _on_gather() -> None:
+        if pc.iceGatheringState == "complete":
+            done.set()
+
+    try:
+        await asyncio.wait_for(done.wait(), timeout=timeout_sec)
+    except asyncio.TimeoutError:
+        log.warning(
+            "WebRTC: ICE gathering ╨╜╨╡ ╨╖╨░╨▓╨╡╤Ç╤ê╨╕╨╗╤ü╤Å ╨╖╨░ %.0f ╤ü (state=%s) ΓÇö answer ╤â╨╣╨┤╤æ╤é ╤ü ╤é╨╡╨╝, ╤ç╤é╨╛ ╨╡╤ü╤é╤î",
+            timeout_sec,
+            pc.iceGatheringState,
+        )
+    return pc.iceGatheringState
+
+
+class WebRTCHost:
+    """
+    Main WebRTC host: creates peer connection, attaches H.264 video,
+    handles Data Channel commands for Romeo and camera control.
+    """
+
+    def __init__(
+        self,
+        firebase_cred: str,
+        firebase_db_url: str,
+        room_id: str,
+        width: int = 1280,
+        height: int = 720,
+        fps: float = 30.0,
+        bitrate: int = 4_000_000,
+        intra: int = 30,
+        profile: str | None = "baseline",
+        camera_extra_args: list[str] | None = None,
+        command_handler: Callable[[dict], dict] | None = None,
+        ice_config_url: str | None = None,
+        ice_config_token: str | None = None,
+        ice_merge_public_stun: bool = True,
+        ice_fetch_timeout_sec: float = 8.0,
+        ice_config_required: bool = False,
+        ice_turn_only: bool = False,
+    ) -> None:
+        self._firebase_cred = firebase_cred
+        self._firebase_db_url = firebase_db_url
+        self._room_id = room_id
+        self._command_handler = command_handler
+
+        self._video_width = width
+        self._video_height = height
+        self._video_fps = fps
+        self._video_bitrate = bitrate
+        self._video_intra = intra
+        self._video_profile = profile
+        self._camera_extra_args = camera_extra_args
+
+        self._ice_config_url = (ice_config_url or "").strip() or None
+        self._ice_config_token = ice_config_token if ice_config_token else None
+        self._ice_merge_public_stun = ice_merge_public_stun
+        self._ice_fetch_timeout_sec = ice_fetch_timeout_sec
+        self._ice_config_required = ice_config_required
+        self._ice_turn_only = ice_turn_only
+
+        self._video_track: H264CameraTrack | None = None
+        self._pc: RTCPeerConnection | None = None
+        self._signaling: FirebaseSignaling | None = None
+        self._running = False
+        self._host_session_id = 0
+
+    async def run(self) -> None:
+        """Main loop: create room, wait for offer, connect, stream."""
+        init_firebase(self._firebase_cred, self._firebase_db_url)
+        log.info(
+            "WebRTC: signaling ╨▓ Firebase ╤é╨╛╨╗╤î╨║╨╛ ╨▓ /rooms/%s/ ΓÇª "
+            "╨ÿ╨╝╤Å ╨║╨╛╨╝╨╜╨░╤é╤ï ╨ö╨₧╨¢╨û╨¥╨₧ ╨▒╤ï╤é╤î ╤é╨╡╨╝ ╨╢╨╡ ╨▓╨╛ ╨▓╤ü╤æ╨╝ ╨║╨╛╨┤╨╡ ╨▒╤Ç╨░╤â╨╖╨╡╤Ç╨░ (╨╕╨╜╨░╤ç╨╡ offer ╤â╨╣╨┤╤æ╤é ┬½╨▓ ╨┤╤Ç╤â╨│╤â╤Ä┬╗ ╨║╨╛╨╝╨╜╨░╤é╤â, answer ╨╜╨╡ ╨▓╨╡╤Ç╨╜╤æ╤é╤ü╤Å).",
+            self._room_id,
+        )
+        self._running = True
+        self._prev_ufrag: str | None = None
+        self._signaling = FirebaseSignaling(self._room_id)
+        launch_id = int(time.time() * 1000)
+        await self._signaling.reset_room_for_host_launch(launch_id)
+
+        while self._running:
+            if self._host_session_id > 0 and self._signaling:
+                await self._signaling.reset_room_for_retry(self._host_session_id)
+            try:
+                await self._session()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                log.exception("WebRTC session error")
+            finally:
+                await self._cleanup_session()
+
+            if self._running:
+                self._host_session_id += 1
+                log.info("WebRTC: session ended, restarting in 2s...")
+                await asyncio.sleep(2.0)
+
+    async def _session(self) -> None:
+        if not self._signaling:
+            self._signaling = FirebaseSignaling(self._room_id)
+
+        offer_data = await self._signaling.wait_for_offer(
+            prev_ufrag=self._prev_ufrag
+        )
+        self._prev_ufrag = self._signaling.last_ufrag
+
+        from aiortc import RTCConfiguration, RTCPeerConnection, RTCSessionDescription
+
+        from rpi_tools.webrtc_ice_config import build_rtc_ice_servers
+        from rpi_tools.webrtc_video import H264CameraTrack
+
+        ice_servers = await build_rtc_ice_servers(
+            ice_config_url=self._ice_config_url,
+            ice_config_token=self._ice_config_token,
+            fallback_stun_urls=STUN_SERVERS,
+            merge_public_stun=self._ice_merge_public_stun,
+            fetch_timeout_sec=self._ice_fetch_timeout_sec,
+            ice_config_required=self._ice_config_required,
+            ice_turn_only=self._ice_turn_only,
+        )
+        config = RTCConfiguration(iceServers=ice_servers)
+        self._pc = RTCPeerConnection(configuration=config)
+        log.info("WebRTC: peer connection created")
+
+        v_tx = self._pc.addTransceiver("video", direction="sendrecv")
+        try:
+            prefs = _pref_video_codec_preferences_for_answer()
+            if prefs:
+                v_tx.setCodecPreferences(prefs)
+                log.info(
+                    "WebRTC: setCodecPreferences ╨┤╨╛ setRemote (H264 profile-level-id): %s",
+                    [
+                        (c.parameters or {}).get("profile-level-id", "?")
+                        for c in prefs
+                        if getattr(c, "mimeType", "") == "video/H264"
+                    ]
+                    or "?",
+                )
+        except Exception as exc:
+            log.warning("WebRTC: setCodecPreferences (video): %s", exc)
+
+        def _wire_data_channel(channel) -> None:
+            @channel.on("open")
+            def on_open():
+                log.info("WebRTC: Data Channel %r ╨╛╤é╨║╤Ç╤ï╤é (╨│╨╛╤é╨╛╨▓ ╨║ JSON-╨║╨╛╨╝╨░╨╜╨┤╨░╨╝)", channel.label)
+
+            @channel.on("message")
+            def on_msg(msg):
+                self._handle_data_channel_message(channel, msg)
+
+        @self._pc.on("datachannel")
+        def on_datachannel(channel):
+            log.info("WebRTC: Data Channel ╨╛╤é ╨║╨╗╨╕╨╡╨╜╤é╨░ label=%r", channel.label)
+            _wire_data_channel(channel)
+
+        @self._pc.on("connectionstatechange")
+        async def on_connection_state_change():
+            state = self._pc.connectionState
+            log.info("WebRTC: connection state -> %s", state)
+            if state == "connected":
+                await self._signaling.set_status("connected")
+            elif state in ("failed", "closed", "disconnected"):
+                await self._signaling.mark_failed_need_reconnect()
+
+        @self._pc.on("iceconnectionstatechange")
+        async def on_ice_state():
+            log.info("WebRTC: ICE state -> %s", self._pc.iceConnectionState)
+
+        local_ice_typs: list[str] = []
+
+        @self._pc.on("icecandidate")
+        async def on_ice_candidate(candidate):
+            if candidate and self._signaling:
+                sdp_line = candidate.to_sdp()
+                typ = _ice_typ_from_sdp(sdp_line)
+                local_ice_typs.append(typ)
+                if self._ice_turn_only and typ != "relay":
+                    log.debug(
+                        "WebRTC: skip ICE typ=%s ╨┤╨╗╤Å Firebase (╤Ç╨╡╨╢╨╕╨╝ VPS-only)",
+                        typ,
+                    )
+                    return
+                log.info(
+                    "WebRTC: local ICE typ=%s -> Firebase calleeCandidates (%.80sΓÇª)",
+                    typ,
+                    sdp_line,
+                )
+                await self._signaling.send_ice_candidate({
+                    "candidate": sdp_line,
+                    "sdpMid": candidate.sdpMid,
+                    "sdpMLineIndex": candidate.sdpMLineIndex,
+                })
+
+        offer = RTCSessionDescription(
+            sdp=offer_data["sdp"],
+            type=offer_data.get("type", "offer"),
+        )
+        await self._pc.setRemoteDescription(offer)
+        log.info("WebRTC: remote description set")
+
+        # ╨Æ offer ╨╜╨╡╤é m=application ΓÇö ╨▒╤Ç╨░╤â╨╖╨╡╤Ç ╨╜╨╡ ╨┐╨╛╨┤╨╜╤Å╨╗ SCTP; ╤ü╨╛╨╖╨┤╨░╤æ╨╝ ╨║╨░╨╜╨░╨╗ ╤ü Pi (╤ç╨░╤ü╤é╤î ╤ü╤é╨░╤Ç╤ï╤à ╤ü╤é╤Ç╨░╨╜╨╕╤å).
+        offer_sdp = offer_data.get("sdp", "")
+        if "m=application" not in offer_sdp.lower():
+            try:
+                dc_pi = self._pc.createDataChannel("romeo", ordered=True)
+                _wire_data_channel(dc_pi)
+                log.info(
+                    "WebRTC: ╨▓ SDP ╨╜╨╡ ╨▒╤ï╨╗╨╛ SCTP ΓÇö ╤ü╨╛╨╖╨┤╨░╨╜ ╨╕╤ü╤à╨╛╨┤╤Å╤ë╨╕╨╣ DataChannel %r ╤ü╨╛ ╤ü╤é╨╛╤Ç╨╛╨╜╤ï Pi",
+                    dc_pi.label,
+                )
+            except Exception as ex:
+                log.warning("WebRTC: ╨╜╨╡ ╤â╨┤╨░╨╗╨╛╤ü╤î ╤ü╨╛╨╖╨┤╨░╤é╤î DataChannel ╨╜╨░ Pi: %s", ex)
+
+        seen_candidates: set[str] = set()
+
+        async def _safe_add_remote_ice(candidate: RTCIceCandidate) -> None:
+            if not self._pc:
+                return
+            try:
+                await self._pc.addIceCandidate(candidate)
+            except Exception as ex:
+                log.warning(
+                    "WebRTC: addIceCandidate remote %s:%s failed: %s",
+                    candidate.ip,
+                    candidate.port,
+                    ex,
+                )
+
+        def _add_candidate(candidate_data: dict) -> None:
+            key = candidate_data.get("candidate", "")
+            if not key or key in seen_candidates:
+                return
+            seen_candidates.add(key)
+            candidate = _parse_ice_candidate(candidate_data)
+            if candidate and self._pc:
+                raw = candidate_data.get("candidate", "")
+                log.info(
+                    "WebRTC: remote ICE typ=%s %s:%s (callerCandidates)",
+                    _ice_typ_from_sdp(raw),
+                    candidate.ip,
+                    candidate.port,
+                )
+                asyncio.ensure_future(_safe_add_remote_ice(candidate))
+
+        existing = await self._signaling.poll_remote_candidates()
+        for c_data in existing:
+            _add_candidate(c_data)
+        if existing:
+            log.info("WebRTC: loaded %d existing ICE candidates", len(existing))
+
+        self._signaling.listen_remote_candidates(_add_candidate)
+
+        self._video_track = H264CameraTrack(
+            width=self._video_width,
+            height=self._video_height,
+            fps=self._video_fps,
+            bitrate=self._video_bitrate,
+            intra=self._video_intra,
+            profile=self._video_profile,
+            camera_extra_args=self._camera_extra_args,
+        )
+        try:
+            self._video_track.start_source()
+            log.info(
+                "WebRTC: rpicam/╨║╨░╨╝╨╡╤Ç╨░ ╨╖╨░╨┐╤â╤ë╨╡╨╜╤ï ╨┤╨╛ SDP answer (╨▒╤ï╤ü╤é╤Ç╨╡╨╡ ╨┐╨╡╤Ç╨▓╤ï╨╣ RTP)"
+            )
+        except Exception as ex:
+            log.error(
+                "WebRTC: ╨╜╨╡ ╤â╨┤╨░╨╗╨╛╤ü╤î ╨╖╨░╨┐╤â╤ü╤é╨╕╤é╤î ╨║╨░╨╝╨╡╤Ç╤â ╨┤╨╛ answer: %s. "
+                "╨ƒ╤Ç╨╛╨▓╨╡╤Ç╤î╤é╨╡ rpicam-vid / libcamera-vid ╨╕ ╨┤╨╛╤ü╤é╤â╨┐ ╨║ ╨║╨░╨╝╨╡╤Ç╨╡.",
+                ex,
+            )
+            raise
+
+        v_tx.sender.replaceTrack(self._video_track)
+        log.info(
+            "WebRTC: H.264-╤é╤Ç╨╡╨║ ╨┐╤Ç╨╕╨▓╤Å╨╖╨░╨╜ ╨║ ╤é╤Ç╨░╨╜╤ü╨╛╨▓╨╡╤Ç╤â (replaceTrack) ╨┐╨╡╤Ç╨╡╨┤ createAnswer"
+        )
+
+        answer = await self._pc.createAnswer()
+        await self._pc.setLocalDescription(answer)
+        gather_state = await _wait_ice_gathering_complete(self._pc, timeout_sec=15.0)
+        relay_n = sum(1 for t in local_ice_typs if t == "relay")
+        log.info(
+            "WebRTC: ICE gathering=%s, ╨╗╨╛╨║╨░╨╗╤î╨╜╤ï╤à ╨║╨░╨╜╨┤╨╕╨┤╨░╤é╨╛╨▓=%d (relay=%d) ΓÇö typ: %s",
+            gather_state,
+            len(local_ice_typs),
+            relay_n,
+            local_ice_typs[:12] if local_ice_typs else "╨╜╨╡╤é (TURN ╤ü Pi ╨╜╨╡ ╨╛╤é╨┤╨░╨╗╤ü╤Å?)",
+        )
+        if relay_n == 0 and local_ice_typs:
+            log.warning(
+                "WebRTC: ╨╜╨╡╤é typ relay ╤ü Pi ΓÇö ╨┐╤Ç╨╕ iceTransportPolicy=relay ╨▓ ╨▒╤Ç╨░╤â╨╖╨╡╤Ç╨╡ "
+                "╤ü╨╡╤ü╤ü╨╕╤Å ╨╛╨▒╨╛╤Ç╨▓╤æ╤é╤ü╤Å. ╨ù╨░╨┐╤â╤ü╨║ ╤ü --ice-vps-only ╨╕ ╨┐╤Ç╨╛╨▓╨╡╤Ç╤î╤é╨╡ coturn/UDP 49160-65535 ╨╜╨░ VPS."
+            )
+        log.info("WebRTC: local description set (answer)")
+        try:
+            for t in self._pc.getTransceivers():
+                if t.kind != "video" or not getattr(t.sender, "track", None):
+                    continue
+                cdx = getattr(t, "_codecs", None) or ()
+                names = []
+                for c in cdx[:6]:
+                    n = getattr(c, "name", None) or str(c)
+                    names.append(n)
+                log.info(
+                    "WebRTC: ╨▓╨╕╨┤╨╡╨╛╤é╤Ç╨░╨╜╤ü╨╛╨▓╨╡╤Ç ╨╜╨░╨┐╤Ç╨░╨▓╨╗╨╡╨╜╨╕╨╡=%s ╤ü╨╛╨│╨╗╨░╤ü╨╛╨▓╨░╨╜╨╜╤ï╨╡ ╨║╨╛╨┤╨╡╨║╨╕: %s",
+                    getattr(t, "direction", "?"),
+                    names or "?",
+                )
+        except Exception as ex:
+            log.debug("WebRTC: ╨╗╨╛╨│ ╨║╨╛╨┤╨╡╨║╨╛╨▓: %s", ex)
+
+        answer_sdp = self._pc.localDescription.sdp
+        await _publish_sdp_candidates_to_firebase(
+            self._signaling,
+            answer_sdp,
+            turn_only=self._ice_turn_only,
+        )
+        await self._signaling.send_answer({
+            "sdp": answer_sdp,
+            "type": self._pc.localDescription.type,
+        })
+
+        async def _poll_and_signal_eoc() -> None:
+            """Poll for late candidates, then signal end-of-candidates."""
+            for _ in range(20):
+                await asyncio.sleep(1.0)
+                if not self._pc or self._pc.connectionState == "connected":
+                    return
+                candidates = await self._signaling.poll_remote_candidates()
+                for c_data in candidates:
+                    _add_candidate(c_data)
+
+            if self._pc and self._pc.connectionState != "connected":
+                log.info("WebRTC: signaling end-of-candidates")
+                try:
+                    await self._pc.addIceCandidate(None)
+                except Exception:
+                    log.debug("WebRTC: addIceCandidate(None) not supported, skipping")
+
+        poll_task = asyncio.ensure_future(_poll_and_signal_eoc())
+
+        deadline = asyncio.get_event_loop().time() + 30.0
+        while self._running and self._pc:
+            state = self._pc.connectionState
+            if state in ("failed", "closed"):
+                log.info("WebRTC: connection %s ΓÇö ending session", state)
+                break
+            if state == "connected":
+                break
+            if asyncio.get_event_loop().time() > deadline:
+                log.warning("WebRTC: ICE timeout (30s) ΓÇö ending session")
+                break
+            await asyncio.sleep(0.3)
+
+        poll_task.cancel()
+
+        if self._pc and self._pc.connectionState == "connected":
+            log.info("WebRTC: streaming active, waiting for disconnect...")
+            while self._running and self._pc and self._pc.connectionState == "connected":
+                await asyncio.sleep(1.0)
+
+    def _handle_data_channel_message(self, channel, message: str | bytes) -> None:
+        if isinstance(message, bytes):
+            message = message.decode("utf-8", errors="replace")
+
+        text = message.strip()
+        if not text:
+            return
+
+        try:
+            obj = json.loads(text)
+        except json.JSONDecodeError:
+            obj = {"romeo": text}
+
+        response: dict
+        if self._command_handler:
+            try:
+                response = self._command_handler(obj)
+            except Exception as e:
+                response = {"ok": False, "error": str(e)}
+        else:
+            response = {"ok": False, "error": "no command handler configured"}
+
+        if channel and channel.readyState == "open":
+            try:
+                channel.send(json.dumps(response, ensure_ascii=False))
+            except Exception:
+                log.debug("WebRTC: failed to send DC response")
+
+    async def _cleanup_session(self) -> None:
+        if self._video_track:
+            self._video_track.stop()
+            self._video_track = None
+        self._kill_stale_rpicam()
+        if self._pc:
+            try:
+                await self._pc.close()
+            except Exception:
+                pass
+            self._pc = None
+        if self._signaling:
+            try:
+                await self._signaling.cleanup()
+            except Exception:
+                pass
+            self._signaling = None
+
+    @staticmethod
+    def _kill_stale_rpicam() -> None:
+        """Kill any leftover rpicam-vid processes to free the camera."""
+        import subprocess as _sp
+        try:
+            _sp.run(["pkill", "-f", "rpicam-vid"], capture_output=True, timeout=3)
+        except Exception:
+            pass
+
+    def request_stop(self) -> None:
+        self._running = False
+
+
+async def run_webrtc_host(
+    firebase_cred: str,
+    firebase_db_url: str,
+    room_id: str,
+    width: int = 1280,
+    height: int = 720,
+    fps: float = 30.0,
+    bitrate: int = 4_000_000,
+    intra: int = 30,
+    profile: str | None = "baseline",
+    camera_extra_args: list[str] | None = None,
+    command_handler: Callable[[dict], dict] | None = None,
+    ice_config_url: str | None = None,
+    ice_config_token: str | None = None,
+    ice_merge_public_stun: bool = True,
+    ice_fetch_timeout_sec: float = 8.0,
+    ice_config_required: bool = False,
+    ice_turn_only: bool = False,
+) -> None:
+    """Entry point: run WebRTC host until interrupted."""
+    try:
+        import aiortc as _aiortc  # noqa: F401
+        import av as _av  # noqa: F401
+        del _aiortc, _av
+    except ModuleNotFoundError as e:
+        log.error(
+            "╨¥╨╡ ╤â╤ü╤é╨░╨╜╨╛╨▓╨╗╨╡╨╜ ╨┐╨░╨║╨╡╤é aiortc (╨╛╨▒╤ï╤ç╨╜╨╛ ╨▓╨╝╨╡╤ü╤é╨╡ ╤ü PyAV/av). "
+            "╨Æ ╤ì╤é╨╛╨╝ ╨╢╨╡ ╨╕╨╜╤é╨╡╤Ç╨┐╤Ç╨╡╤é╨░╤é╨╛╤Ç╨╡: pip install aiortc av ╨╕╨╗╨╕ pip install -r requirements.txt "
+            "(╤ü╨╝. %s).",
+            e,
+        )
+        raise SystemExit(1) from e
+
+    host = WebRTCHost(
+        firebase_cred=firebase_cred,
+        firebase_db_url=firebase_db_url,
+        room_id=room_id,
+        width=width, height=height, fps=fps,
+        bitrate=bitrate, intra=intra, profile=profile,
+        camera_extra_args=camera_extra_args,
+        command_handler=command_handler,
+        ice_config_url=ice_config_url,
+        ice_config_token=ice_config_token,
+        ice_merge_public_stun=ice_merge_public_stun,
+        ice_fetch_timeout_sec=ice_fetch_timeout_sec,
+        ice_config_required=ice_config_required,
+        ice_turn_only=ice_turn_only,
+    )
+
+    loop = asyncio.get_event_loop()
+    stop_event = asyncio.Event()
+
+    def _signal_handler():
+        log.info("WebRTC: stop signal received")
+        host.request_stop()
+        stop_event.set()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, _signal_handler)
+        except NotImplementedError:
+            pass
+
+    try:
+        await host.run()
+    finally:
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.remove_signal_handler(sig)
+            except NotImplementedError:
+                pass
+
+=====FILE /home/pavel/projects/Mobile_Raspberry_5-/rpi_tools/webrtc_video.py =====
+"""H.264 camera track for WebRTC: rpicam-vid ΓåÆ decode ΓåÆ av.VideoFrame for aiortc."""
+
+from __future__ import annotations
+
+import asyncio
+import fractions
+import logging
+import queue
+import shutil
+import subprocess
+import threading
+from typing import Optional
+
+import av
+from aiortc import MediaStreamTrack
+from aiortc.mediastreams import MediaStreamError
+
+log = logging.getLogger("camstream.webrtc")
+
+# ╨á╨░╨╖╨╝╨╡╤Ç ╨╛╤ç╨╡╤Ç╨╡╨┤╨╡╨╣ ╨┤╨╡╨║╨╛╨┤╨╕╤Ç╨╛╨▓╨░╨╜╨╕╤Å ΓåÆ aiortc. ╨á╨░╨╜╤î╤ê╨╡ 30 ╨║╨░╨┤╤Ç╨╛╨▓ @ 30 fps ╨┤╨░╨▓╨░╨╗╨╕ ╨┤╨╛ ~1 ╤ü ╨╖╨░╨┤╨╡╤Ç╨╢╨║╨╕
+# ╨╝╨╡╨╢╨┤╤â ╤Ç╨╡╨░╨╗╤î╨╜╨╛╤ü╤é╤î╤Ä ╨╕ ╤é╨╡╨╝, ╤ç╤é╨╛ ╤ç╨╕╤é╨░╨╡╤é RTP (╨┐╨╗╤Ä╤ü ╨▒╤Ç╨░╤â╨╖╨╡╤Ç). ╨£╨░╨╗╨╡╨╜╤î╨║╨░╤Å ╨╛╤ç╨╡╤Ç╨╡╨┤╤î: ╨╝╨╡╨╜╤î╤ê╨╡ ╨╗╨░╨│,
+# ╨▓╨╛╨╖╨╝╨╛╨╢╨╜╤ï ╨┤╤Ç╨╛╨┐╤ï ╨║╨░╨┤╤Ç╨╛╨▓ ╨┐╤Ç╨╕ ╨▓╤ü╨┐╨╗╨╡╤ü╨║╨░╤à ╨╜╨░╨│╤Ç╤â╨╖╨║╨╕.
+_DECODE_QUEUE_MAXSIZE = 3
+
+# ╨ƒ╨╡╤Ç╨▓╤ï╨╣ ╨║╨░╨┤╤Ç ╤ü rpicam + PyAV ╨╜╨░ Pi ╨╝╨╛╨╢╨╡╤é ╨╖╨░╨╜╨╕╨╝╨░╤é╤î 10ΓÇô30+ ╤ü; ╨║╨╛╤Ç╨╛╤é╨║╨╕╨╣ recv-╤é╨░╨╣╨╝╨░╤â╤é ╤â╨▒╨╕╨▓╨░╨╗ RTP.
+_FIRST_FRAME_RECV_TIMEOUT_SEC = 40.0
+_FRAME_RECV_TIMEOUT_SEC = 8.0
+
+
+def _h264_tool_path() -> str | None:
+    for name in ("rpicam-vid", "libcamera-vid"):
+        path = shutil.which(name)
+        if path:
+            return path
+    return None
+
+
+def _build_rpicam_command(
+    tool_path: str,
+    width: int,
+    height: int,
+    fps: float,
+    bitrate: int,
+    intra: int,
+    profile: str | None,
+    camera_extra_args: list[str] | None = None,
+) -> list[str]:
+    cmd = [
+        tool_path,
+        "-t", "0",
+        "-n",
+        "--flush",
+        "--codec", "h264",
+        "--libav-format", "h264",
+        "--inline",
+        "--width", str(max(64, int(width))),
+        "--height", str(max(64, int(height))),
+        "--framerate", f"{max(1.0, float(fps)):g}",
+        "--bitrate", str(max(500_000, int(bitrate))),
+    ]
+    if intra > 0:
+        cmd.extend(("--intra", str(max(1, int(intra)))))
+    if profile:
+        cmd.extend(("--profile", str(profile)))
+    if camera_extra_args:
+        cmd.extend(camera_extra_args)
+    cmd.extend(("-o", "-"))
+    return cmd
+
+
+class H264CameraTrack(MediaStreamTrack):
+    """
+    Reads H.264 from rpicam-vid, decodes to av.VideoFrame,
+    and yields frames for aiortc's RTP sender to re-encode.
+    """
+
+    kind = "video"
+
+    def __init__(
+        self,
+        width: int = 1280,
+        height: int = 720,
+        fps: float = 30.0,
+        bitrate: int = 4_000_000,
+        intra: int = 30,
+        profile: str | None = "high",
+        camera_extra_args: list[str] | None = None,
+    ) -> None:
+        super().__init__()
+        self._width = width
+        self._height = height
+        self._fps = fps
+        self._bitrate = bitrate
+        self._intra = intra
+        self._profile = profile
+        self._camera_extra_args = camera_extra_args or []
+
+        self._proc: subprocess.Popen | None = None
+        self._decode_thread: threading.Thread | None = None
+        self._frame_q: queue.Queue[av.VideoFrame | None] = queue.Queue(
+            maxsize=_DECODE_QUEUE_MAXSIZE,
+        )
+        self._queue: asyncio.Queue[av.VideoFrame] = asyncio.Queue(
+            maxsize=_DECODE_QUEUE_MAXSIZE,
+        )
+        self._reader_task: asyncio.Task | None = None
+        self._started = False
+        self._got_first_frame = False
+        self._pts = 0
+        self._time_base = fractions.Fraction(1, 90000)
+        self._pts_step = int(90000 / max(1, fps))
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    def start_source(self, camera_extra_args: list[str] | None = None) -> None:
+        if camera_extra_args is not None:
+            self._camera_extra_args = camera_extra_args
+        tool = _h264_tool_path()
+        if not tool:
+            raise RuntimeError("rpicam-vid / libcamera-vid not found")
+        cmd = _build_rpicam_command(
+            tool,
+            self._width, self._height, self._fps,
+            self._bitrate, self._intra, self._profile,
+            self._camera_extra_args,
+        )
+        log.info("H264CameraTrack: starting %s", " ".join(cmd))
+        self._proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self._started = True
+        self._got_first_frame = False
+
+        self._decode_thread = threading.Thread(
+            target=self._decoder_worker,
+            daemon=True,
+            name="h264-decoder",
+        )
+        self._decode_thread.start()
+
+        self._loop = asyncio.get_running_loop()
+        self._reader_task = self._loop.create_task(self._reader_loop())
+
+    def _log_source_health(self, context: str) -> None:
+        """╨ƒ╤Ç╨╕ ╨╛╤é╤ü╤â╤é╤ü╤é╨▓╨╕╨╕ ╨║╨░╨┤╤Ç╨╛╨▓ ΓÇö ╨┐╨╛╨╜╤Å╤é╤î: rpicam ╤â╨╝╨╡╤Ç ╨╕╨╗╨╕ ╨╡╤ë╤æ ╨║╤Ç╤â╤é╨╕╤é╤ü╤Å."""
+        proc = self._proc
+        if not proc:
+            log.warning("H264CameraTrack: %s ΓÇö ╨╜╨╡╤é ╨┐╤Ç╨╛╤å╨╡╤ü╤ü╨░ ╨║╨░╨╝╨╡╤Ç╤ï", context)
+            return
+        rc = proc.poll()
+        if rc is not None:
+            tail = ""
+            if proc.stderr:
+                try:
+                    tail = proc.stderr.read(4096).decode(errors="replace")
+                except Exception:
+                    pass
+            log.error(
+                "H264CameraTrack: %s ΓÇö rpicam/libcamera ╨╖╨░╨▓╨╡╤Ç╤ê╨╕╨╗╤ü╤Å rc=%s stderr=%s",
+                context,
+                rc,
+                (tail[:1200] if tail else "(╨┐╤â╤ü╤é╨╛)"),
+            )
+        else:
+            log.warning(
+                "H264CameraTrack: %s ΓÇö ╨┐╤Ç╨╛╤å╨╡╤ü╤ü ╨╢╨╕╨▓, ╨║╨░╨┤╤Ç╨╛╨▓ ╨▓ ╨╛╤ç╨╡╤Ç╨╡╨┤╨╕ ╨┐╨╛╨║╨░ ╨╜╨╡╤é",
+                context,
+            )
+
+    def _decoder_worker(self) -> None:
+        """Thread: reads rpicam-vid pipe, decodes H.264 ΓåÆ av.VideoFrame, pushes to queue."""
+        proc = self._proc
+        if not proc or not proc.stdout:
+            self._frame_q.put(None)
+            return
+
+        total_frames = 0
+        try:
+            container = av.open(proc.stdout, format="h264", mode="r")
+            for frame in container.decode(video=0):
+                total_frames += 1
+                if total_frames <= 3 or total_frames % 200 == 0:
+                    log.info("H264CameraTrack: decoded frame #%d %dx%d",
+                             total_frames, frame.width, frame.height)
+                try:
+                    self._frame_q.put(frame, timeout=2.0)
+                except queue.Full:
+                    try:
+                        self._frame_q.get_nowait()
+                    except queue.Empty:
+                        pass
+                    self._frame_q.put(frame, timeout=2.0)
+        except Exception:
+            log.exception("H264CameraTrack: decoder thread error")
+        finally:
+            self._frame_q.put(None)
+            stderr_tail = ""
+            if proc.stderr:
+                try:
+                    stderr_tail = proc.stderr.read(4096).decode(errors="replace")
+                except Exception:
+                    pass
+            rc = proc.poll()
+            log.info("H264CameraTrack: decoder thread done (frames=%d, rc=%s, stderr=%s)",
+                     total_frames, rc, stderr_tail[:500] if stderr_tail else "(empty)")
+
+    async def _reader_loop(self) -> None:
+        """Async bridge: pulls decoded VideoFrame from thread queue ΓåÆ asyncio queue."""
+        loop = asyncio.get_event_loop()
+        try:
+            while True:
+                frame = await loop.run_in_executor(None, self._frame_q.get)
+                if frame is None:
+                    break
+
+                frame.pts = self._pts
+                frame.time_base = self._time_base
+                self._pts += self._pts_step
+
+                if self._queue.full():
+                    try:
+                        self._queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        pass
+                await self._queue.put(frame)
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            log.exception("H264CameraTrack: reader loop error")
+        finally:
+            log.info("H264CameraTrack: reader loop finished")
+
+    async def recv(self) -> av.VideoFrame:
+        if self.readyState != "live":
+            raise MediaStreamError
+
+        if not self._started:
+            self.start_source()
+
+        deadline = (
+            _FIRST_FRAME_RECV_TIMEOUT_SEC
+            if not self._got_first_frame
+            else _FRAME_RECV_TIMEOUT_SEC
+        )
+        try:
+            frame = await asyncio.wait_for(self._queue.get(), timeout=deadline)
+        except asyncio.TimeoutError:
+            self._log_source_health(
+                f"╨╜╨╡╤é ╨║╨░╨┤╤Ç╨░ ╨╖╨░ {deadline:.0f}s (╨┤╨╛ ╨┐╨╡╤Ç╨▓╨╛╨│╨╛ ╨╕╨╗╨╕ ╨╝╨╡╨╢╨┤╤â ╨║╨░╨┤╤Ç╨░╨╝╨╕)"
+            )
+            raise MediaStreamError
+        self._got_first_frame = True
+        return frame
+
+    def stop(self) -> None:
+        super().stop()
+        if self._reader_task and not self._reader_task.done():
+            self._reader_task.cancel()
+        if self._proc and self._proc.poll() is None:
+            self._proc.terminate()
+            try:
+                self._proc.wait(timeout=3.0)
+            except subprocess.TimeoutExpired:
+                self._proc.kill()
+            log.info("H264CameraTrack: rpicam-vid stopped")
+
+    async def restart_source(self, camera_extra_args: list[str] | None = None) -> None:
+        """Restart rpicam-vid with new camera args (preset/zoom change)."""
+        log.info("H264CameraTrack: restarting source")
+        if self._reader_task and not self._reader_task.done():
+            self._reader_task.cancel()
+            try:
+                await self._reader_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        if self._proc and self._proc.poll() is None:
+            self._proc.terminate()
+            try:
+                self._proc.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                self._proc.kill()
+
+        if self._decode_thread and self._decode_thread.is_alive():
+            self._decode_thread.join(timeout=3.0)
+
+        while not self._queue.empty():
+            try:
+                self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
+        while not self._frame_q.empty():
+            try:
+                self._frame_q.get_nowait()
+            except queue.Empty:
+                break
+
+        self._pts = 0
+        self.start_source(camera_extra_args)
+
+=====FILE /home/pavel/projects/Mobile_Raspberry_5-/rpi_tools/webrtc_ice_config.py =====
+"""╨ù╨░╨│╤Ç╤â╨╖╨║╨░ ICE (STUN/TURN) ╤ü HTTP API ╨┤╨╗╤Å WebRTC ╨▓╨╜╨╡ ╨┤╨╛╨╝╨░╤ê╨╜╨╡╨╣ ╤ü╨╡╤é╨╕ (coturn + ice_config_server)."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import ssl
+from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+
+log = logging.getLogger("camstream.webrtc")
+
+
+def _ice_url_with_token_param(url: str, token: str) -> str:
+    if "token=" in url:
+        return url
+    sep = "&" if "?" in url else "?"
+    return url + sep + urlencode({"token": token})
+
+
+def _fetch_ice_json_sync(url: str, token: str | None, timeout_sec: float) -> dict[str, Any]:
+    """GET JSON ╤ü ╤é╨╡╨╗╨╛╨╝ ╨▓╨╕╨┤╨░ {\"iceServers\": [...] }."""
+    final_url = url
+    headers: dict[str, str] = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+        final_url = _ice_url_with_token_param(url, token)
+
+    req = Request(final_url, headers=headers, method="GET")
+    ctx = ssl.create_default_context()
+    with urlopen(req, timeout=timeout_sec, context=ctx) as resp:
+        raw = resp.read().decode("utf-8", errors="replace")
+    return json.loads(raw)
+
+
+def ice_json_to_rtci_servers(entries: list[Any]) -> list:
+    """╨ƒ╤Ç╨╡╨╛╨▒╤Ç╨░╨╖╤â╨╡╤é ╨╝╨░╤ü╤ü╨╕╨▓ WebRTC iceServers ╨▓ ╤ü╨┐╨╕╤ü╨╛╨║ aiortc.RTCIceServer."""
+    from aiortc import RTCIceServer
+
+    out: list[RTCIceServer] = []
+    for ent in entries:
+        if not isinstance(ent, dict):
+            continue
+        urls = ent.get("urls")
+        if urls is None:
+            continue
+        kwargs: dict[str, Any] = {"urls": urls}
+        u = ent.get("username")
+        if u is not None and u != "":
+            kwargs["username"] = str(u)
+        c = ent.get("credential")
+        if c is not None:
+            kwargs["credential"] = str(c)
+        ct = ent.get("credentialType")
+        if ct:
+            kwargs["credentialType"] = str(ct)
+        out.append(RTCIceServer(**kwargs))
+    return out
+
+
+def filter_turn_only_ice_servers(servers: list) -> list:
+    """╨₧╤ü╤é╨░╨▓╨╕╤é╤î ╤é╨╛╨╗╤î╨║╨╛ TURN (relay ╤ç╨╡╤Ç╨╡╨╖ VPS); ╤â╨▒╤Ç╨░╤é╤î STUN ╨╕╨╖ ╨╛╤é╨▓╨╡╤é╨░ ICE API."""
+    out: list = []
+    for s in servers:
+        raw = getattr(s, "urls", None)
+        if raw is None:
+            continue
+        urls = [raw] if isinstance(raw, str) else list(raw)
+        if any(str(u).strip().lower().startswith("turn:") for u in urls):
+            out.append(s)
+    return out
+
+
+async def load_ice_servers_from_http(
+    url: str,
+    token: str | None,
+    *,
+    timeout_sec: float = 8.0,
+) -> list:
+    """
+    ╨É╤ü╨╕╨╜╤à╤Ç╨╛╨╜╨╜╨░╤Å ╨╛╨▒╤æ╤Ç╤é╨║╨░: HTTP GET ╨▓ thread pool, ╨┐╨░╤Ç╤ü iceServers ΓåÆ RTCIceServer.
+    ╨ƒ╤Ç╨╕ ╨╛╤ê╨╕╨▒╨║╨╡ ╨▒╤Ç╨╛╤ü╨░╨╡╤é ╨╕╤ü╨║╨╗╤Ä╤ç╨╡╨╜╨╕╨╡ (╨▓╤ï╨╖╤ï╨▓╨░╤Ä╤ë╨╕╨╣ ╤Ç╨╡╤ê╨░╨╡╤é fallback).
+    """
+    data = await asyncio.to_thread(_fetch_ice_json_sync, url, token, timeout_sec)
+    servers = data.get("iceServers")
+    if not isinstance(servers, list):
+        raise ValueError("╨╛╤é╨▓╨╡╤é API: ╨╛╨╢╨╕╨┤╨░╨╗╤ü╤Å ╨╝╨░╤ü╤ü╨╕╨▓ iceServers")
+    return ice_json_to_rtci_servers(servers)
+
+
+async def build_rtc_ice_servers(
+    *,
+    ice_config_url: str | None,
+    ice_config_token: str | None,
+    fallback_stun_urls: list[str],
+    merge_public_stun: bool,
+    fetch_timeout_sec: float = 8.0,
+    ice_config_required: bool = False,
+    ice_turn_only: bool = False,
+) -> list:
+    """
+    ╨í╨╛╨▒╨╕╤Ç╨░╨╡╤é ╤ü╨┐╨╕╤ü╨╛╨║ RTCIceServer ╨┤╨╗╤Å RTCConfiguration.
+
+    - ╨ò╤ü╨╗╨╕ ╨╖╨░╨┤╨░╨╜ ice_config_url: GET JSON, iceServers; ╨┐╤Ç╨╕ ╤â╤ü╨┐╨╡╤à╨╡ + ╨╛╨┐╤å╨╕╨╛╨╜╨░╨╗╤î╨╜╨╛
+      ╨┤╨╛╨┐╨╕╤ü╤ï╨▓╨░╨╡╤é fallback_stun_urls (Google STUN ╨╕ ╤é.╨┤.).
+    - ╨ò╤ü╨╗╨╕ URL ╨╜╨╡ ╨╖╨░╨┤╨░╨╜ ╨╕╨╗╨╕ ╨╖╨░╨┐╤Ç╨╛╤ü/╨┐╨░╤Ç╤ü╨╕╨╜╨│ ╨╜╨╡ ╤â╨┤╨░╨╗╨╕╤ü╤î ΓÇö ╤é╨╛╨╗╤î╨║╨╛ fallback_stun_urls,
+      ╨║╤Ç╨╛╨╝╨╡ ice_config_required (╤é╨╛╨│╨┤╨░ ╨╛╤ê╨╕╨▒╨║╨░).
+    - ice_turn_only: ╤é╨╛╨╗╤î╨║╨╛ turn: ╨╕╨╖ ╨╛╤é╨▓╨╡╤é╨░ API (╤Ç╨╡╨╢╨╕╨╝ ┬½╤é╨╛╨╗╤î╨║╨╛ relay ╤ç╨╡╤Ç╨╡╨╖ VPS┬╗).
+    """
+    from aiortc import RTCIceServer
+
+    fallback = [RTCIceServer(urls=u) for u in fallback_stun_urls if u]
+
+    if not (ice_config_url and ice_config_url.strip()):
+        if ice_config_required:
+            raise RuntimeError(
+                "WebRTC: ╨╖╨░╨┤╨░╨╜ ╤Ç╨╡╨╢╨╕╨╝ ╤é╨╛╨╗╤î╨║╨╛ VPS (ICE API ╨╛╨▒╤Å╨╖╨░╤é╨╡╨╗╨╡╨╜), ╨╜╨╛ --ice-config-url / ICE_CONFIG_URL ╨┐╤â╤ü╤é"
+            )
+        log.info("WebRTC: ICE API ╨╜╨╡ ╨╖╨░╨┤╨░╨╜ ΓÇö ╤é╨╛╨╗╤î╨║╨╛ ╨▓╤ü╤é╤Ç╨╛╨╡╨╜╨╜╤ï╨╣ STUN (%s)", fallback_stun_urls)
+        return fallback
+
+    u = ice_config_url.strip()
+    try:
+        remote = await load_ice_servers_from_http(
+            u, ice_config_token, timeout_sec=fetch_timeout_sec
+        )
+    except HTTPError as e:
+        if ice_config_required:
+            raise RuntimeError(
+                f"WebRTC: ICE API HTTP {e.code} {e.reason} ΓÇö ╤Ç╨╡╨╢╨╕╨╝ VPS-only ╨▒╨╡╨╖ fallback"
+            ) from e
+        log.warning("WebRTC: ICE API HTTP %s: %s ΓÇö fallback STUN", e.code, e.reason)
+        return fallback
+    except (URLError, OSError, TimeoutError, json.JSONDecodeError, ValueError) as e:
+        if ice_config_required:
+            raise RuntimeError(
+                f"WebRTC: ICE API ╨╜╨╡╨┤╨╛╤ü╤é╤â╨┐╨╡╨╜ ({e}) ΓÇö ╤Ç╨╡╨╢╨╕╨╝ VPS-only ╨▒╨╡╨╖ fallback"
+            ) from e
+        log.warning("WebRTC: ICE API ╨╜╨╡╨┤╨╛╤ü╤é╤â╨┐╨╡╨╜ (%s) ΓÇö fallback STUN", e)
+        return fallback
+
+    if not remote:
+        if ice_config_required:
+            raise RuntimeError("WebRTC: ICE API ╨▓╨╡╤Ç╨╜╤â╨╗ ╨┐╤â╤ü╤é╨╛╨╣ iceServers ΓÇö ╤Ç╨╡╨╢╨╕╨╝ VPS-only")
+        log.warning("WebRTC: ICE API ╨▓╨╡╤Ç╨╜╤â╨╗ ╨┐╤â╤ü╤é╨╛╨╣ iceServers ΓÇö fallback STUN")
+        return fallback
+
+    if ice_turn_only:
+        remote = filter_turn_only_ice_servers(remote)
+        if not remote:
+            raise RuntimeError(
+                "WebRTC: ╨▓ ╨╛╤é╨▓╨╡╤é╨╡ ICE API ╨╜╨╡╤é turn: ΓÇö ╤Ç╨╡╨╢╨╕╨╝ VPS-only (relay) ╨╜╨╡╨▓╨╛╨╖╨╝╨╛╨╢╨╡╨╜"
+            )
+        log.info("WebRTC: ICE ╤é╨╛╨╗╤î╨║╨╛ TURN ╤ü VPS (%d ╤ü╨╡╤Ç╨▓╨╡╤Ç╨╛╨▓)", len(remote))
+        return remote
+
+    if merge_public_stun and fallback:
+        merged = list(remote)
+        merged.extend(fallback)
+        log.info(
+            "WebRTC: ICE ╨╕╨╖ API (%d ╤ü╨╡╤Ç╨▓╨╡╤Ç╨╛╨▓) + ╨┐╤â╨▒╨╗╨╕╤ç╨╜╤ï╨╣ STUN (%d)",
+            len(remote),
+            len(fallback),
+        )
+        return merged
+
+    log.info("WebRTC: ICE ╤é╨╛╨╗╤î╨║╨╛ ╨╕╨╖ API (%d ╤ü╨╡╤Ç╨▓╨╡╤Ç╨╛╨▓)", len(remote))
+    return remote
+
+=====FILE /home/pavel/projects/Mobile_Raspberry_5-/rpi_tools/cli.py =====
+"""╨ò╨┤╨╕╨╜╨░╤Å ╤é╨╛╤ç╨║╨░ ╨▓╤à╨╛╨┤╨░: argparse ╨╕ ╨▓╤ï╨╖╨╛╨▓ ╨╝╨╛╨┤╤â╨╗╨╡╨╣ ╨║╨░╨╝╨╡╤Ç╤ï, Romeo, WiΓÇæFi."""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import os
+import sys
+from pathlib import Path
+
+from rpi_tools.camera_stream import _default_capture_mode, run_send
+from rpi_tools.errors import TcpBindError
+from rpi_tools.config import (
+    DISCOVERY_PORT_DEFAULT,
+    JPEG_TCP_QUEUE_DEPTH_DEFAULT,
+    ROMEO_ADC_DEFAULT_CHANNEL,
+    ROMEO_CONTROL_PORT_DEFAULT,
+    ROMEO_PIVOT_TANK_SCALE,
+    ROMEO_TANK_SPEED_DEFAULT,
+    ROMEO_USB_PORT,
+)
+from rpi_tools.logutil import setup_logging
+from rpi_tools.romeo_usb import (
+    run_adc_cal,
+    run_adc_read,
+    run_flash_romeo,
+    run_serial_send,
+    run_vbat_read,
+)
+from rpi_tools.stream_profiles import apply_stream_preset
+from rpi_tools.wifi_connect import (
+    ap_password_resolve,
+    run_wifi_apply_from_file,
+    run_wifi_connect,
+    run_wifi_hotspot,
+)
+from rpi_tools.wifi_scan import run_wifi_scan
+
+log = logging.getLogger("camstream")
+
+_FIREBASE_ENV_HINT_RU = (
+    "╨ƒ╨╛╨┤╤ü╤é╨░╨▓╨╕╤é╤î ╨┐╤â╤é╨╕ ╨╕╨╖ ╨┐╨╡╤Ç╨╡╨╝╨╡╨╜╨╜╤ï╤à ╨╛╨║╤Ç╤â╨╢╨╡╨╜╨╕╤Å ╨╜╨╡ ╤â╨┤╨░╨╗╨╛╤ü╤î (╤ç╨░╤ü╤é╨╛ ╨┐╤â╤ü╤é╨╛╨╣ ╤Ç╨╡╨╖╤â╨╗╤î╤é╨░╤é ╨╛╤é ${env:ΓÇª} ╨┐╤Ç╨╕ ╨╛╤é╨╗╨░╨┤╨║╨╡). "
+    "╨í╨╛╨╖╨┤╨░╨╣╤é╨╡ config/firebase.debug.env ╨╕╨╖ config/firebase.debug.env.example "
+    "(╨╕╨╗╨╕ ╨▓╤ï╨┐╨╛╨╗╨╜╨╕╤é╨╡ scripts/ensure_firebase_debug_env.sh) ╨╕ ╨▓╤ï╨▒╨╡╤Ç╨╕╤é╨╡ ╨▓ launch.json envFile ╤ì╤é╨╛╤é ╤ä╨░╨╣╨╗."
+)
+
+
+def _firebase_cred_existing_path(raw: str) -> str:
+    """╨¥╨╡ ╨┐╤â╤ü╤é╨░╤Å ╤ü╤é╤Ç╨╛╨║╨░, ╤ä╨░╨╣╨╗ JSON ╨║╨╗╤Ä╤ç╨░ Firebase ╤ü╤â╤ë╨╡╤ü╤é╨▓╤â╨╡╤é."""
+    s = (raw or "").strip()
+    if not s:
+        raise argparse.ArgumentTypeError(
+            "--firebase-cred ╨╜╨╡ ╨╝╨╛╨╢╨╡╤é ╨▒╤ï╤é╤î ╨┐╤â╤ü╤é╤ï╨╝.\n"
+            + _FIREBASE_ENV_HINT_RU
+        )
+    path = Path(s).expanduser()
+    if not path.is_file():
+        raise argparse.ArgumentTypeError(f"╨ñ╨░╨╣╨╗ ╨║╨╗╤Ä╤ç╨░ ╨╜╨╡ ╨╜╨░╨╣╨┤╨╡╨╜ ╨╕╨╗╨╕ ╨╜╨╡ ╤ä╨░╨╣╨╗: {path}")
+    return str(path.resolve())
+
+
+def _firebase_rtdb_url(raw: str) -> str:
+    u = (raw or "").strip()
+    if not u:
+        raise argparse.ArgumentTypeError(
+            "--firebase-db-url ╨╜╨╡ ╨╝╨╛╨╢╨╡╤é ╨▒╤ï╤é╤î ╨┐╤â╤ü╤é╤ï╨╝.\n" + _FIREBASE_ENV_HINT_RU
+        )
+    low = u.lower()
+    if not low.startswith("https://"):
+        raise argparse.ArgumentTypeError("URL ╨▒╨░╨╖╤ï ╨┤╨░╨╜╨╜╤ï╤à ╨┤╨╛╨╗╨╢╨╡╨╜ ╨╜╨░╤ç╨╕╨╜╨░╤é╤î╤ü╤Å ╤ü https://")
+    if "firestore.googleapis.com" in low or "firebasestorage.googleapis.com" in low:
+        raise argparse.ArgumentTypeError(
+            "╨ƒ╨╛╤à╨╛╨╢╨╡ ╨╜╨░ Firestore ╨╕╨╗╨╕ Storage URL; ╨┤╨╗╤Å WebRTC ╨╜╤â╨╢╨╡╨╜ Realtime Database."
+        )
+    if "firebaseio.com" not in low and "firebasedatabase.app" not in low:
+        raise argparse.ArgumentTypeError(
+            "╨₧╨╢╨╕╨┤╨░╨╡╤é╤ü╤Å ╤â╨╖╨╡╨╗ ╨▓╨╕╨┤╨░ *.firebaseio.com ╨╕╨╗╨╕ *.firebasedatabase.app "
+            "(Realtime Database)."
+        )
+    return u.rstrip("/")
+
+
+def _webrtc_room_non_empty(raw: str) -> str:
+    rid = (raw or "").strip()
+    if not rid:
+        raise argparse.ArgumentTypeError(
+            "--room ╨╜╨╡ ╨╝╨╛╨╢╨╡╤é ╨▒╤ï╤é╤î ╨┐╤â╤ü╤é╤ï╨╝ "
+            '(╨┐╤â╤ü╤é╨░╤Å ╤ü╤é╤Ç╨╛╨║╨░ ╤ü╨▒╤Ç╨╛╤ü╨╕╤é ╨╕╨╝╤Å ╨║╨╛╨╝╨╜╨░╤é╤ï; omit --room ╨╕ ╨▒╤â╨┤╨╡╤é "pi-camera").'
+        )
+    return rid
+
+
+def _print_hotspot_blocked_hint() -> None:
+    print(
+        "camstream: ╨▓╤ï╤à╨╛╨┤ ╤ü ╨║╨╛╨┤╨╛╨╝ 2 ΓÇö ╤ì╤é╨╛ ╨╜╨╡ ╨┐╨░╨┤╨╡╨╜╨╕╨╡. "
+        "AP ╨╜╨╡ ╨┐╨╛╨┤╨╜╤Å╤é: ╨╜╨╡╤é ╨░╨║╤é╨╕╨▓╨╜╨╛╨│╨╛ Ethernet (eth0). "
+        "╨ƒ╨╛╨┤╨║╨╗╤Ä╤ç╨╕╤é╨╡ ╨║╨░╨▒╨╡╨╗╤î, ╨╗╨╕╨▒╨╛ ╨┤╨╛╨▒╨░╨▓╤î╤é╨╡ --ap-force (╨╕╨╗╨╕ wifi-hotspot --force), "
+        "╨╗╨╕╨▒╨╛ ╨▓ Run and Debug ╨▓╤ï╨▒╨╡╤Ç╨╕╤é╨╡ ╨║╨╛╨╜╤ä╨╕╨│╤â╤Ç╨░╤å╨╕╤Ä ╤ü --ap-force.",
+        file=sys.stderr,
+    )
+
+
+class ArgparseCliExit(Exception):
+    """╨ƒ╨╛╨┤╨╝╨╡╨╜╨░ argparse exit(): ╨╜╨╡ ╨▓╤ï╨╖╤ï╨▓╨░╤é╤î sys.exit (╨╗╨╛╨╝╨░╨╡╤é ╨╛╤é╨╗╨░╨┤╤ç╨╕╨║/pydevd ╨╜╨░ Python 3.13)."""
+
+    __slots__ = ("code",)
+
+    def __init__(self, code: int | None = 0) -> None:
+        self.code = code
+
+
+class CamstreamArgumentParser(argparse.ArgumentParser):
+    """╨Æ╤ü╨╡ ╨┐╨╛╨┤╨║╨╛╨╝╨░╨╜╨┤╤ï ╤ü exit_on_error=False; help/╨╛╤ê╨╕╨▒╨║╨╕ ╤ç╨╡╤Ç╨╡╨╖ ArgparseCliExit ╨╕╨╗╨╕ ArgumentError."""
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("exit_on_error", False)
+        super().__init__(*args, **kwargs)
+
+    def exit(self, status: int = 0, message: str | None = None) -> None:  # noqa: A003 (argparse API)
+        if message:
+            self._print_message(message, sys.stderr)
+        raise ArgparseCliExit(status)
+
+
+def _print_usage_chain_for_cli_error(main_parser: argparse.ArgumentParser, argv: list[str]) -> None:
+    """╨Ü╨░╨║ ┬½usage┬╗ ╨▓ stderr ╤â argparse.error, ╨┐╨╗╤Ä╤ü usage ╨┐╨╛╨┤╨║╨╛╨╝╨░╨╜╨┤╤ï ╨┐╨╛ argv (╨╡╤ü╨╗╨╕ ╨╜╨░╤ê╨╗╨╕)."""
+    main_parser.print_usage(sys.stderr)
+    sub_action = None
+    for action in getattr(main_parser, "_actions", []):
+        if action.__class__.__name__ == "_SubParsersAction":
+            sub_action = action
+            break
+    if sub_action is None:
+        return
+    name_map = getattr(sub_action, "_name_parser_map", {})
+    for tok in argv[1:]:
+        if tok.startswith("-"):
+            continue
+        if tok in name_map:
+            try:
+                name_map[tok].print_usage(sys.stderr)
+            except Exception:
+                pass
+            break
+
+
+def main() -> int:
+    parser = CamstreamArgumentParser(
+        description="Raspberry Pi: ╨║╨░╨╝╨╡╤Ç╨░ (H.264/TCP/UDP + legacy JPEG/TCP + UDP discovery), Romeo USB, WiΓÇæFi, ╨┐╤Ç╨╛╤ê╨╕╨▓╨║╨░"
+    )
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default="INFO",
+        help="╨¢╨╛╨│╨╕ ╨▓ stderr (╤â╨┤╨╛╨▒╨╜╨╛ ╤ü╨╝╨╛╤é╤Ç╨╡╤é╤î ╨┐╨╛ SSH)",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="╨ƒ╨╛╨┤╤Ç╨╛╨▒╨╜╤ï╨╣ ╨▓╤ï╨▓╨╛╨┤ (-v = ╤â╤Ç╨╛╨▓╨╡╨╜╤î DEBUG)",
+    )
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_send = sub.add_parser("send", help="╨í╤é╤Ç╨╕╨╝ ╨║╨░╨╝╨╡╤Ç╤ï Raspberry Pi (UDP/H.264, H.264/TCP, RTSP, legacy JPEG/TCP)")
+    p_send.add_argument(
+        "--host",
+        default="auto",
+        help="IP ╨┐╤Ç╨╕╤æ╨╝╨╜╨╕╨║╨░/╨ƒ╨Ü ╨▓ LAN ╨╕╨╗╨╕ auto ΓÇö ╨┐╨╛╨╕╤ü╨║ ╨┐╨╛ UDP (╨┤╨╗╤Å udp_h264/rtp_h264 ╤â╨║╨░╨╢╨╕╤é╨╡ IP ╨ƒ╨Ü ╤Å╨▓╨╜╨╛; ╨┤╨╗╤Å rtsp_h264 ╨╜╨╡ ╨╕╤ü╨┐╨╛╨╗╤î╨╖╤â╨╡╤é╤ü╤Å)",
+    )
+    p_send.add_argument(
+        "--port",
+        type=int,
+        default=5000,
+        help="╨ƒ╨╛╤Ç╤é ╨▓╨╕╨┤╨╡╨╛╨┐╨╛╤é╨╛╨║╨░: TCP/UDP ╨┐╨╛╤Ç╤é ╨▓╨╕╨┤╨╡╨╛ ╨╕╨╗╨╕ RTSP service port ╨┤╨╗╤Å rtsp_h264 (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä RTSP ╨╛╨▒╤ï╤ç╨╜╨╛ 8554)",
+    )
+    p_send.add_argument("--camera", type=int, default=0, help="╨ÿ╨╜╨┤╨╡╨║╤ü ╨║╨░╨╝╨╡╤Ç╤ï (0 ╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä)")
+    p_send.add_argument(
+        "--width",
+        type=int,
+        default=1920,
+        help="╨¿╨╕╤Ç╨╕╨╜╨░ ╨║╨░╨┤╤Ç╨░ (╨┤╨╗╤Å custom ╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä 1920; preset broadcast/cinema ╤é╨╛╨╢╨╡ ╨┐╨╛╨┤╤ü╤é╨░╨▓╨╗╤Å╤Ä╤é 1080p)",
+    )
+    p_send.add_argument("--height", type=int, default=1080, help="╨Æ╤ï╤ü╨╛╤é╨░ ╨║╨░╨┤╤Ç╨░ (╨┤╨╗╤Å custom ╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä 1080)")
+    p_send.add_argument(
+        "--fps",
+        type=float,
+        default=30.0,
+        help="╨ù╨░╨┐╤Ç╨╛╤ê╨╡╨╜╨╜╤ï╨╣ FPS (╨╡╤ü╨╗╨╕ ╨║╨░╨╝╨╡╤Ç╨░ ╨╕ ╨▒╤ì╨║╨╡╨╜╨┤ ╤Ç╨╡╨░╨╗╤î╨╜╨╛ ╨▓╤ï╨┤╨░╤Ä╤é)",
+    )
+    p_send.add_argument(
+        "--jpeg-quality",
+        type=int,
+        default=92,
+        help="╨Ü╨░╤ç╨╡╤ü╤é╨▓╨╛ JPEG 1ΓÇô100 (╨┐╤Ç╨╡╤ü╨╡╤é broadcast ╨┐╨╛╨┤╤ü╤é╨░╨▓╨╗╤Å╨╡╤é 92; ╤ü╨╝. docs/pi-stream-quality.ru.md)",
+    )
+    p_send.add_argument(
+        "--stream-preset",
+        choices=["custom", "broadcast", "cinema", "mobile", "realtime"],
+        default="broadcast",
+        help=(
+            "╨ô╨╛╤é╨╛╨▓╤ï╨╣ ╨┐╤Ç╨╛╤ä╨╕╨╗╤î ╤Ç╨░╨╖╤Ç╨╡╤ê╨╡╨╜╨╕╤Å/FPS/╨▒╨╕╤é╤Ç╨╡╨╣╤é╨░: broadcast (1080p30 ╨▓╤ï╤ü╨╛╨║╨╕╨╣ ╨▒╨╕╤é╤Ç╨╡╨╣╤é), "
+            "cinema (1080p24 ╨╝╨░╨║╤ü╨╕╨╝╤â╨╝ ╨║╨░╤ç╨╡╤ü╤é╨▓╨░), mobile (720p30 ╨┤╨╗╤Å ╤ü╨╗╨░╨▒╨╡╨╡ ╨║╨░╨╜╨░╨╗╨░), "
+            "realtime (960x540 ╨┤╨╗╤Å ╨╝╨╕╨╜╨╕╨╝╨░╨╗╤î╨╜╨╛╨╣ ╨╖╨░╨┤╨╡╤Ç╨╢╨║╨╕). "
+            "custom ΓÇö ╤é╨╛╨╗╤î╨║╨╛ ╤Å╨▓╨╜╤ï╨╡ --width/--fps/..."
+        ),
+    )
+    p_send.add_argument(
+        "--video-mode",
+        choices=["auto", "h264_tcp", "udp_h264", "rtp_h264", "rtsp_h264", "jpeg_tcp"],
+        default="auto",
+        help=(
+            "╨á╨╡╨╢╨╕╨╝ ╨┐╨╡╤Ç╨╡╨┤╨░╤ç╨╕ ╨▓╨╕╨┤╨╡╨╛: auto ΓÇö H.264/TCP ╨▓ --listen ╨▒╨╡╨╖ overlay ╨╕╨╗╨╕ ╤ü╤é╨░╨▒╨╕╨╗╤î╨╜╤ï╨╣ udp_h264 ╨┐╤Ç╨╕ ╤Å╨▓╨╜╨╛╨╝ --host; "
+            "╨╕╨╜╨░╤ç╨╡ legacy JPEG/TCP; h264_tcp ΓÇö ╨░╨┐╨┐╨░╤Ç╨░╤é╨╜╤ï╨╣ libcamera/rpicam ╨┐╤â╤é╤î ╤ç╨╡╤Ç╨╡╨╖ TCP listen; "
+            "udp_h264 ΓÇö ╨╛╤ü╨╜╨╛╨▓╨╜╨╛╨╣ ╨╛╨┐╨╡╤Ç╨░╤é╨╛╤Ç╤ü╨║╨╕╨╣ low-latency ╨┐╤â╤é╤î: H.264 ╨▓ MPEG-TS/UDP ╨╜╨░ --host:<port>; "
+            "rtp_h264 ΓÇö ╨▓╤Ç╨╡╨╝╨╡╨╜╨╜╤ï╨╣ alias ╨╜╨░ udp_h264, ╨┐╨╛╨║╨░ RTP-╤ü╨╛╨▓╨╝╨╡╤ü╤é╨╕╨╝╨╛╤ü╤é╤î ╨┤╨╛╤Ç╨░╨▒╨░╤é╤ï╨▓╨░╨╡╤é╤ü╤Å; "
+            "rtsp_h264 ΓÇö RTSP/H.264 server ╨╜╨░ Pi ╨┤╨╗╤Å ╨║╨╗╨╕╨╡╨╜╤é╨╛╨▓ ╨┐╨╛ rtsp://<pi-ip>:<port>/<path>; "
+            "jpeg_tcp ΓÇö ╤ü╤é╨░╤Ç╤ï╨╣ ╨║╨░╤ü╤é╨╛╨╝╨╜╤ï╨╣ ╨┐╤Ç╨╛╤é╨╛╨║╨╛╨╗ 4 ╨▒╨░╨╣╤é╨░ + JPEG."
+        ),
+    )
+    p_send.add_argument(
+        "--video-bitrate",
+        type=int,
+        default=40_000_000,
+        metavar="BPS",
+        help="╨ª╨╡╨╗╨╡╨▓╨╛╨╣ ╨▒╨╕╤é╤Ç╨╡╨╣╤é ╨┤╨╗╤Å H.264 ╤Ç╨╡╨╢╨╕╨╝╨░ ╨▓ ╨▒╨╕╤é/╤ü (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä 40000000 = 40 ╨£╨▒╨╕╤é/╤ü).",
+    )
+    p_send.add_argument(
+        "--video-intra",
+        type=int,
+        default=15,
+        metavar="N",
+        help="╨ÿ╨╜╤é╨╡╤Ç╨▓╨░╨╗ I-frame / IDR ╨┤╨╗╤Å H.264 ╤Ç╨╡╨╢╨╕╨╝╨░ (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä 15 ╨║╨░╨┤╤Ç╨╛╨▓; ╨╝╨╡╨╜╤î╤ê╨╡ ΓÇö ╨▒╤ï╤ü╤é╤Ç╨╡╨╡ recovery ╨╕ ╨╜╨╕╨╢╨╡ ╨╖╨░╨┤╨╡╤Ç╨╢╨║╨░).",
+    )
+    p_send.add_argument(
+        "--video-profile",
+        choices=["baseline", "main", "high"],
+        default="high",
+        help="H.264 profile ╨┤╨╗╤Å ╨╜╨╛╨▓╨╛╨│╨╛ ╨┐╨╛╤é╨╛╨║╨░ (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä high).",
+    )
+    p_send.add_argument(
+        "--video-level",
+        default=None,
+        metavar="LVL",
+        help="╨₧╨┐╤å╨╕╨╛╨╜╨░╨╗╤î╨╜╤ï╨╣ H.264 level ╨┤╨╗╤Å ╤ü╨╕╤ü╤é╨╡╨╝╨╜╨╛╨│╨╛ ╤ì╨╜╨║╨╛╨┤╨╡╤Ç╨░ (╨╜╨░╨┐╤Ç╨╕╨╝╨╡╤Ç 4.2).",
+    )
+    p_send.add_argument(
+        "--rtsp-path",
+        default="camera",
+        help="RTSP mount path ╨┤╨╗╤Å rtsp_h264 (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä /camera).",
+    )
+    p_send.add_argument(
+        "--jpeg-chroma",
+        choices=["444", "422", "420"],
+        default="422",
+        help="Legacy JPEG/TCP: ╤ü╤â╨▒╨┤╨╕╤ü╨║╤Ç╨╡╤é╨╕╨╖╨░╤å╨╕╤Å ╤å╨▓╨╡╤é╨░ JPEG: 444 ΓÇö ╨╗╤â╤ç╤ê╨╡ ╨║╤Ç╨░╤Å/╤å╨▓╨╡╤é, 420 ΓÇö ╨╝╨╡╨╜╤î╤ê╨╡ ╨▒╨╕╤é╤Ç╨╡╨╣╤é.",
+    )
+    p_send.add_argument(
+        "--jpeg-threads",
+        type=int,
+        default=8,
+        metavar="N",
+        help="Legacy JPEG/TCP: ╨┐╨╛╤é╨╛╨║╨╕ ╨║╨╛╨┤╨╕╤Ç╨╛╨▓╨░╨╜╨╕╤Å picamera2 JpegEncoder (MultiEncoder + simplejpeg).",
+    )
+    p_send.add_argument(
+        "--no-jpeg-fast-dct",
+        action="store_true",
+        help="Legacy JPEG/TCP: ╨╖╨░╨┐╨░╤ü╨╜╨╛╨╣ ╤å╨╕╨║╨╗ capture_array ╨╕╤ü╨┐╨╛╨╗╤î╨╖╤â╨╡╤é ╤é╨╛╤ç╨╜╨╡╨╡ DCT ╨▓ simplejpeg (╨╝╨╡╨┤╨╗╨╡╨╜╨╜╨╡╨╡).",
+    )
+    p_send.add_argument(
+        "--legacy-picamera-jpeg-loop",
+        action="store_true",
+        help="Legacy JPEG/TCP: ╨╜╨╡ ╨╕╤ü╨┐╨╛╨╗╤î╨╖╨╛╨▓╨░╤é╤î picamera2 JpegEncoder; ╤é╨╛╨╗╤î╨║╨╛ capture_array+JPEG (╤à╤â╨╢╨╡ FPS).",
+    )
+    p_send.add_argument(
+        "--jpeg-tcp-queue",
+        type=int,
+        default=JPEG_TCP_QUEUE_DEPTH_DEFAULT,
+        metavar="N",
+        help=(
+            "Legacy JPEG/TCP: ╨╛╤ç╨╡╤Ç╨╡╨┤╤î ╨╛╤é╨┐╤Ç╨░╨▓╨║╨╕ JPEG ╨┐╨╛ TCP (╨╛╤é╨┤╨╡╨╗╤î╨╜╤ï╨╣ ╨┐╨╛╤é╨╛╨║ ╨╜╨░ Pi). "
+            "╨ƒ╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä %(default)s: ╨║╨╛╨┤╨╡╤Ç ╨╜╨╡ ╨▒╨╗╨╛╨║╨╕╤Ç╤â╨╡╤é╤ü╤Å, ╨╡╤ü╨╗╨╕ ╨ƒ╨Ü/WiΓÇæFi ╤ç╨╕╤é╨░╤Ä╤é ╨╝╨╡╨┤╨╗╨╡╨╜╨╜╨╛. "
+            "0 ΓÇö ╨▒╨╡╨╖ ╨╛╤ç╨╡╤Ç╨╡╨┤╨╕ (╨▓╨╡╤ü╤î sendall ╨▓ ╨┐╨╛╤é╨╛╨║╨╡ ╨║╨╛╨┤╨╕╤Ç╨╛╨▓╨░╨╜╨╕╤Å)."
+        ),
+    )
+    p_send.add_argument(
+        "--discover-port",
+        type=int,
+        default=DISCOVERY_PORT_DEFAULT,
+        help="UDP-╨┐╨╛╤Ç╤é handshake (╤é╨╛╤é ╨╢╨╡, ╤ç╤é╨╛ ╤ü╨╗╤â╤ê╨░╨╡╤é ╨▓╨░╤ê╨╡ ╨┐╤Ç╨╕╨╗╨╛╨╢╨╡╨╜╨╕╨╡ ╨╜╨░ ╨ƒ╨Ü)",
+    )
+    p_send.add_argument(
+        "--discover-token",
+        default=None,
+        help="╨í╨╡╨║╤Ç╨╡╤é ╨┤╨╗╤Å UDP discover (╨┤╨╛╨╗╨╢╨╡╨╜ ╤ü╨╛╨▓╨┐╨░╨┤╨░╤é╤î ╤ü ╨║╨╗╨╕╨╡╨╜╤é╨╛╨╝ ╨╜╨░ ╨ƒ╨Ü)",
+    )
+    p_send.add_argument(
+        "--discover-timeout",
+        type=float,
+        default=5.0,
+        help="╨í╨╡╨║╤â╨╜╨┤ ╨╛╨╢╨╕╨┤╨░╨╜╨╕╤Å ╨╛╤é╨▓╨╡╤é╨╛╨▓ ╨╖╨░ ╨╛╨┤╨╕╨╜ ╤Ç╨░╤â╨╜╨┤ discovery",
+    )
+    p_send.add_argument(
+        "--discover-index",
+        type=int,
+        default=0,
+        help="╨ò╤ü╨╗╨╕ ╨╜╨░╨╣╨┤╨╡╨╜╨╛ ╨╜╨╡╤ü╨║╨╛╨╗╤î╨║╨╛ ╨╛╤é╨▓╨╡╤é╨╛╨▓ discover ΓÇö ╨╜╨╛╨╝╨╡╤Ç ╨▓ ╤ü╨┐╨╕╤ü╨║╨╡ (0 ╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä)",
+    )
+    p_send.add_argument(
+        "--discover-loop",
+        action="store_true",
+        help="╨ƒ╨╛╨▓╤é╨╛╤Ç╤Å╤é╤î ╨┐╨╛╨╕╤ü╨║, ╨┐╨╛╨║╨░ ╨┐╨╛ UDP ╨╜╨╡ ╨┐╨╛╤Å╨▓╨╕╤é╤ü╤Å ╨┐╤Ç╨╕╤æ╨╝╨╜╨╕╨║",
+    )
+    p_send.add_argument(
+        "--discover-loop-interval",
+        type=float,
+        default=3.0,
+        help="╨ƒ╨░╤â╨╖╨░ ╨╝╨╡╨╢╨┤╤â ╨┐╨╛╨┐╤ï╤é╨║╨░╨╝╨╕ ╨┐╤Ç╨╕ --discover-loop",
+    )
+    p_send.add_argument(
+        "--listen",
+        action="store_true",
+        help="╨í╨╗╤â╤ê╨░╤é╤î TCP ╨╜╨░ ╤ì╤é╨╛╨╣ ╨╝╨░╤ê╨╕╨╜╨╡: UDP discovery + ╨╛╨╢╨╕╨┤╨░╨╜╨╕╨╡ ╨║╨╗╨╕╨╡╨╜╤é╨░, ╨╖╨░╤é╨╡╨╝ ╨║╨░╨╝╨╡╤Ç╨░ (╨┤╨╗╤Å ╨░╨▓╤é╨╛╨╖╨░╨┐╤â╤ü╨║╨░ ╨╜╨░ Pi)",
+    )
+    p_send.add_argument(
+        "--no-discovery",
+        action="store_true",
+        help="╨ƒ╤Ç╨╕ --listen: ╨╜╨╡ ╨╛╤é╨▓╨╡╤ç╨░╤é╤î ╨╜╨░ UDP discovery (╤é╨╛╨╗╤î╨║╨╛ ╨┐╤Ç╤Å╨╝╨╛╨╣ TCP ╨┐╨╛ IP)",
+    )
+    p_send.add_argument(
+        "--timestamp",
+        action="store_true",
+        help="╨á╨╕╤ü╨╛╨▓╨░╤é╤î ╨┤╨░╤é╤â ╨╕ ╨▓╤Ç╨╡╨╝╤Å ╨╜╨░ ╨║╨░╨╢╨┤╨╛╨╝ ╨║╨░╨┤╤Ç╨╡; ╨┤╨╗╤Å H.264 ╤Ç╨╡╨╢╨╕╨╝╨╛╨▓ ╨╜╨╡ ╨┐╨╛╨┤╨┤╨╡╤Ç╨╢╨╕╨▓╨░╨╡╤é╤ü╤Å ╨╕ ╤ä╨╛╤Ç╤ü╨╕╤Ç╤â╨╡╤é legacy JPEG/TCP.",
+    )
+    p_send.add_argument(
+        "--camera-device",
+        default=None,
+        metavar="PATH",
+        help="╨»╨▓╨╜╤ï╨╣ ╨┐╤â╤é╤î V4L2, ╨╜╨░╨┐╤Ç. /dev/video0",
+    )
+    p_send.add_argument(
+        "--capture-backend",
+        choices=["auto", "v4l2", "default"],
+        default="auto",
+        help="╨í╨┐╨╛╤ü╨╛╨▒ ╨╛╤é╨║╤Ç╤ï╤é╨╕╤Å ╨║╨░╨╝╨╡╤Ç╤ï ╨▓ OpenCV (auto ╨┐╨╡╤Ç╨╡╨▒╨╕╤Ç╨░╨╡╤é ╨▓╨░╤Ç╨╕╨░╨╜╤é╤ï)",
+    )
+    p_send.add_argument(
+        "--no-set-fps",
+        action="store_true",
+        help="╨¥╨╡ ╨╖╨░╨┤╨░╨▓╨░╤é╤î CAP_PROP_FPS (╨╜╨░ libcamera ╨╕╨╜╨╛╨│╨┤╨░ ╨╝╨╡╤ê╨░╨╡╤é)",
+    )
+    p_send.add_argument(
+        "--capture",
+        choices=["auto", "opencv", "picamera2"],
+        default=_default_capture_mode(),
+        help=(
+            "╨ù╨░╤à╨▓╨░╤é ╨┤╨╗╤Å legacy JPEG/TCP: ╨╜╨░ Raspberry Pi ╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä picamera2; "
+            "auto ΓÇö OpenCV, ╨┐╤Ç╨╕ ╨╜╨╡╤â╨┤╨░╤ç╨╡ picamera2; opencv ΓÇö ╤é╨╛╨╗╤î╨║╨╛ OpenCV. "
+            "H.264 ╤Ç╨╡╨╢╨╕╨╝╤ï ╨╕╤ü╨┐╨╛╨╗╤î╨╖╤â╤Ä╤é ╤ü╨╕╤ü╤é╨╡╨╝╨╜╤ï╨╣ rpicam/libcamera ╨┐╤â╤é╤î."
+        ),
+    )
+    p_send.add_argument(
+        "--ap-ssid",
+        default=None,
+        metavar="SSID",
+        help="╨ƒ╨╡╤Ç╨╡╨┤ ╨╖╨░╨┐╤â╤ü╨║╨╛╨╝ send ╨┐╨╛╨┤╨╜╤Å╤é╤î ╨╜╨░ Pi WiΓÇæFi ╤é╨╛╤ç╨║╤â ╨┤╨╛╤ü╤é╤â╨┐╨░ ╤ü ╤ì╤é╨╕╨╝ SSID (╨╜╨░╨┐╤Ç╨╕╨╝╨╡╤Ç, 12345)",
+    )
+    p_send.add_argument(
+        "--ap-password",
+        default=None,
+        metavar="PASS",
+        help="╨ƒ╨░╤Ç╨╛╨╗╤î ╤é╨╛╤ç╨║╨╕ ╨┤╨╛╤ü╤é╤â╨┐╨░ WPA2; ╨╕╨╜╨░╤ç╨╡ RPI_AP_PASSWORD ╨╕╨╗╨╕ config/ap.local.env (AP_PASSWORD); ╨╕╨╜╨░╤ç╨╡ 12345678",
+    )
+    p_send.add_argument(
+        "--ap-ifname",
+        default=None,
+        metavar="DEV",
+        help="╨ÿ╨╜╤é╨╡╤Ç╤ä╨╡╨╣╤ü ╨┤╨╗╤Å ╤é╨╛╤ç╨║╨╕ ╨┤╨╛╤ü╤é╤â╨┐╨░, ╨╜╨░╨┐╤Ç. wlan0 (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä ╨░╨▓╤é╨╛)",
+    )
+    p_send.add_argument(
+        "--ap-force",
+        action="store_true",
+        help="╨ƒ╤Ç╨╕╨╜╤â╨┤╨╕╤é╨╡╨╗╤î╨╜╨╛ ╨┐╨╛╨┤╨╜╤Å╤é╤î AP ╨┤╨░╨╢╨╡ ╨▒╨╡╨╖ ethernet uplink (╨╝╨╛╨╢╨╡╤é ╤Ç╨░╨╖╨╛╤Ç╨▓╨░╤é╤î SSH ╨┐╨╛ WiΓÇæFi)",
+    )
+    p_send.add_argument(
+        "--romeo-control-port",
+        type=int,
+        default=ROMEO_CONTROL_PORT_DEFAULT,
+        metavar="PORT",
+        help=(
+            "╨ƒ╤Ç╨╕ --listen: TCP-╨┐╨╛╤Ç╤é ╨┐╤Ç╨╕╤æ╨╝╨░ ╨║╨╛╨╝╨░╨╜╨┤ Romeo ╤ü ╨ƒ╨Ü ╨┐╨╛ WiΓÇæFi/LAN (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä %s; 0 ΓÇö ╨▓╤ï╨║╨╗╤Ä╤ç╨╕╤é╤î). "
+            "╨Æ ╨╛╤é╨▓╨╡╤é UDP discovery ╨┤╨╛╨▒╨░╨▓╨╗╤Å╨╡╤é╤ü╤Å ╨┐╨╛╨╗╨╡ ┬½control┬╗ ╤ü ╤ì╤é╨╕╨╝ ╨┐╨╛╤Ç╤é╨╛╨╝."
+            % (ROMEO_CONTROL_PORT_DEFAULT,)
+        ),
+    )
+    p_send.add_argument(
+        "--romeo-usb",
+        default=None,
+        metavar="DEV",
+        help=f"USB CDC Romeo ╨┤╨╗╤Å ╤ü╨╡╤Ç╨▓╨╡╤Ç╨░ ╤â╨┐╤Ç╨░╨▓╨╗╨╡╨╜╨╕╤Å (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä {ROMEO_USB_PORT} ╨╕╨╖ rpi_tools/config.py)",
+    )
+    p_send.add_argument(
+        "--romeo-baud",
+        type=int,
+        default=115200,
+        help="╨í╨║╨╛╤Ç╨╛╤ü╤é╤î UART Romeo ╨┤╨╗╤Å TCPΓåÆUSB",
+    )
+    p_send.add_argument(
+        "--romeo-open-delay",
+        type=float,
+        default=0.0,
+        metavar="SEC",
+        help="╨ƒ╨░╤â╨╖╨░ ╤é╨╛╨╗╤î╨║╨╛ ╨┐╤Ç╨╕ ╨┐╨╡╤Ç╨▓╨╛╨╝ ╨╛╤é╨║╤Ç╤ï╤é╨╕╨╕ USB ╨▓ TCP-╤ü╨╡╤ü╤ü╨╕╨╕ ╤â╨┐╤Ç╨░╨▓╨╗╨╡╨╜╨╕╤Å (╨╡╤ü╨╗╨╕ ╤ü╨║╨╡╤é╤ç ╨┐╨╡╤Ç╨╡╨╖╨░╨│╤Ç╤â╨╢╨░╨╡╤é╤ü╤Å ╨┐╤Ç╨╕ connect)",
+    )
+    p_send.add_argument(
+        "--romeo-tank-speed",
+        type=int,
+        default=ROMEO_TANK_SPEED_DEFAULT,
+        metavar="N",
+        help=(
+            "╨æ╨░╨╖╨╛╨▓╤ï╨╣ ╨╝╨╛╨┤╤â╨╗╤î ╨┤╨╗╤Å JSON drive left/right: ╨╜╨░ Romeo ╤â╤à╨╛╨┤╨╕╤é TANK ┬▒mag, mag Γëê N├ù"
+            f"{ROMEO_PIVOT_TANK_SCALE:g} (╤ü╨╝. rpi_tools/config ROMEO_PIVOT_TANK_SCALE). "
+            "╨»╨▓╨╜╤ï╨╣ JSON tank / ╤ü╤é╤Ç╨╛╨║╨░ ┬½TANK l r┬╗ ╨╜╨╡ ╨╝╨░╤ü╤ê╤é╨░╨▒╨╕╤Ç╤â╤Ä╤é╤ü╤Å."
+        ),
+    )
+
+    p_send.add_argument(
+        "--romeo-turret-step",
+        type=int,
+        default=None,
+        metavar="DEG",
+        dest="romeo_turret_step",
+        help=(
+            "╨ò╤ü╨╗╨╕ ╨╖╨░╨┤╨░╨╜╨╛: ╨┤╨╗╤Å JSON ┬½action\":\"turret┬╗ ╨▒╨╡╨╖ ╨┐╨╛╨╗╤Å ┬½step┬╗ ╨┐╨╛╨┤╤ü╤é╨░╨▓╨╗╤Å╤é╤î ╤ê╨░╨│ ╨▓ ╨│╤Ç╨░╨┤╤â╤ü╨░╤à "
+            "(╨╜╨░ Romeo ╤â╤à╨╛╨┤╨╕╤é PANL 2 ╨▓╨╝╨╡╤ü╤é╨╛ ╨│╨╛╨╗╨╛╨│╨╛ PANL ΓÇö ╨╝╨╡╨╗╤î╤ç╨╡ ╤ê╨░╨│ ╨┐╤Ç╨╕ ╤â╨┤╨╡╤Ç╨╢╨░╨╜╨╕╨╕ ╨║╨╗╨░╨▓╨╕╤ê╨╕ ╨╜╨░ ╨ƒ╨Ü)."
+        ),
+    )
+    p_send.add_argument(
+        "--romeo-adc-interval",
+        type=float,
+        default=0.0,
+        metavar="SEC",
+        help="╨ƒ╤Ç╨╕ --listen: ╤Ç╨░╨╖ ╨▓ SEC ╨╛╨┐╤Ç╨░╤ê╨╕╨▓╨░╤é╤î ╨║╨░╨╜╨░╨╗ ╨É╨ª╨ƒ ╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä (A1, ╤ü╨╝. ROMEO_ADC_DEFAULT_CHANNEL) ╨┐╨╛ USB. 0 ΓÇö ╨▓╤ï╨║╨╗╤Ä╤ç╨╕╤é╤î.",
+    )
+    p_send.add_argument(
+        "--romeo-led-interval",
+        type=float,
+        default=5.0,
+        metavar="SEC",
+        help="╨ƒ╤Ç╨╕ --listen: ╤Ç╨░╨╖ ╨▓ SEC ╤ü ╤ü╨╗╨░╤é╤î ╨╜╨░ Romeo ╨┐╨╛ USB ╨║╨╛╨╝╨░╨╜╨┤╤â LTG (toggle ╨▒╨╛╤Ç╤é╨╛╨▓╨╛╨│╨╛ ╤ü╨▓╨╡╤é╨╛╨┤╨╕╨╛╨┤╨░). 0 ΓÇö ╨▓╤ï╨║╨╗╤Ä╤ç╨╕╤é╤î.",
+    )
+
+    sub.add_parser("wifi-scan", help="╨ƒ╨╛╨║╨░╨╖╨░╤é╤î ╨┤╨╛╤ü╤é╤â╨┐╨╜╤ï╨╡ WiΓÇæFi ╤ü╨╡╤é╨╕ (nmcli)")
+
+    p_wc = sub.add_parser(
+        "wifi-connect",
+        help="╨ƒ╨╛╨┤╨║╨╗╤Ä╤ç╨╕╤é╤î╤ü╤Å ╨║ WiΓÇæFi ╨╕ ╤ü╨╛╤à╤Ç╨░╨╜╨╕╤é╤î ╨┐╤Ç╨╛╤ä╨╕╨╗╤î (╨░╨▓╤é╨╛╨┐╨╛╨┤╨║╨╗╤Ä╤ç╨╡╨╜╨╕╨╡ ╨┐╨╛╤ü╨╗╨╡ ╨┐╨╡╤Ç╨╡╨╖╨░╨│╤Ç╤â╨╖╨║╨╕)",
+    )
+    p_wc.add_argument("ssid", help="╨ÿ╨╝╤Å ╤ü╨╡╤é╨╕ (SSID)")
+    p_wc.add_argument(
+        "--password",
+        default=None,
+        help="╨ƒ╨░╤Ç╨╛╨╗╤î (╨▓ ps ╨▓╨╕╨┤╨╡╨╜; ╨╗╤â╤ç╤ê╨╡ RPI_WIFI_PASSWORD ╨╕╨╗╨╕ --password-file)",
+    )
+    p_wc.add_argument(
+        "--password-file",
+        default=None,
+        metavar="PATH",
+        help="╨ñ╨░╨╣╨╗ ╤ü ╨╛╨┤╨╜╨╛╨╣ ╤ü╤é╤Ç╨╛╨║╨╛╨╣ ΓÇö ╨┐╨░╤Ç╨╛╨╗╤î (╨┐╤Ç╨░╨▓╨░ chmod 600)",
+    )
+    p_wc.add_argument(
+        "--ifname",
+        default=None,
+        metavar="DEV",
+        help="╨ÿ╨╜╤é╨╡╤Ç╤ä╨╡╨╣╤ü WiΓÇæFi, ╨╜╨░╨┐╤Ç. wlan0 (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä ΓÇö ╨┐╨╡╤Ç╨▓╤ï╨╣ wifi ╨▓ nmcli)",
+    )
+    p_wc.add_argument(
+        "--hidden",
+        action="store_true",
+        help="╨í╨║╤Ç╤ï╤é╨░╤Å ╤ü╨╡╤é╤î (SSID ╨╜╨╡ ╨▓ ╤ì╤ä╨╕╤Ç╨╜╤ï╤à ╨╝╨░╤Å╨║╨░╤à)",
+    )
+
+    p_wa = sub.add_parser(
+        "wifi-apply",
+        help="╨ƒ╨╛╨┤╨║╨╗╤Ä╤ç╨╕╤é╤î WiΓÇæFi ╨╕╨╖ config/wifi.local.env (╤ü╨╡╨║╤Ç╨╡╤é╤ï ╨╜╨╡ ╨▓ git; ╤ü╨╝. wifi.local.env.example)",
+    )
+    p_wa.add_argument(
+        "--env-file",
+        default=None,
+        metavar="PATH",
+        help="╨ñ╨░╨╣╨╗ ╨╜╨░╤ü╤é╤Ç╨╛╨╡╨║ (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä config/wifi.local.env ╨▓ ╨║╨╛╤Ç╨╜╨╡ ╨┐╤Ç╨╛╨╡╨║╤é╨░)",
+    )
+    p_ap = sub.add_parser(
+        "wifi-hotspot",
+        help="╨ƒ╨╛╨┤╨╜╤Å╤é╤î ╤ü╨╛╨▒╤ü╤é╨▓╨╡╨╜╨╜╤â╤Ä WiΓÇæFi ╤ü╨╡╤é╤î (╤é╨╛╤ç╨║╨░ ╨┤╨╛╤ü╤é╤â╨┐╨░) ╨┤╨╗╤Å ╨┐╨╛╨┤╨║╨╗╤Ä╤ç╨╡╨╜╨╕╤Å ╨ƒ╨Ü",
+    )
+    p_ap.add_argument("ssid", nargs="?", default="12345", help="╨ÿ╨╝╤Å ╤ü╨╡╤é╨╕ (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä 12345)")
+    p_ap.add_argument(
+        "--password",
+        default=None,
+        help="╨ƒ╨░╤Ç╨╛╨╗╤î WPA2 (>=8); ╨╕╨╜╨░╤ç╨╡ RPI_AP_PASSWORD ╨╕╨╗╨╕ config/ap.local.env; ╨╕╨╜╨░╤ç╨╡ ╨╖╨░╨┐╨░╤ü╨╜╨╛╨╣ 12345678",
+    )
+    p_ap.add_argument("--ifname", default=None, metavar="DEV", help="╨ÿ╨╜╤é╨╡╤Ç╤ä╨╡╨╣╤ü WiΓÇæFi, ╨╜╨░╨┐╤Ç. wlan0")
+    p_ap.add_argument(
+        "--force",
+        action="store_true",
+        help="╨ƒ╤Ç╨╕╨╜╤â╨┤╨╕╤é╨╡╨╗╤î╨╜╨╛ ╨┐╨╛╨┤╨╜╤Å╤é╤î AP ╨▒╨╡╨╖ ╨┐╤Ç╨╛╨▓╨╡╤Ç╨║╨╕ ethernet uplink (╨╝╨╛╨╢╨╡╤é ╤Ç╨░╨╖╨╛╤Ç╨▓╨░╤é╤î SSH ╨┐╨╛ WiΓÇæFi)",
+    )
+
+    p_flash = sub.add_parser(
+        "flash-romeo",
+        help="╨ƒ╤Ç╨╛╤ê╨╕╤é╤î Romeo/Leonardo (ATmega32U4) ╨┐╨╛ USB ΓÇö ╤ü╨╝. rpi_tools/romeo_usb.py ╨╕ scripts/",
+    )
+    p_flash.add_argument(
+        "--hex",
+        default=os.path.expanduser("~/firmware.hex"),
+        metavar="PATH",
+        help="╨ƒ╤â╤é╤î ╨║ firmware.hex (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä ~/firmware.hex)",
+    )
+
+    p_ser = sub.add_parser(
+        "serial-send",
+        aliases=["romeo"],
+        help="Romeo USB: ╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä ┬½?┬╗+LF, 115200; ╨╛╤é╨▓╨╡╤é ╨▓ stdout (╤ü╨╕╨╜╨╛╨╜╨╕╨╝: romeo)",
+        description=(
+            "╨Ü╨╛╨╝╨░╨╜╨┤╤ï ╨╝╨╛╤é╨╛╤Ç╨╛╨▓/╤ü╨╡╤Ç╨▓╨╛ ╨┐╨╛ ╤é╨╡╨║╤ü╤é╨╛╨▓╨╛╨╝╤â ╨┐╤Ç╨╛╤é╨╛╨║╨╛╨╗╤â ╨┐╤Ç╨╛╤ê╨╕╨▓╨║╨╕. "
+            "╨ƒ╨╛╤Ç╤é USB ╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä ΓÇö ROMEO_USB_PORT ╨▓ rpi_tools/config.py. ╨¢╨╛╨│╨╕ ΓÇö ╨▓ stderr."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_ser.add_argument(
+        "--port",
+        default=ROMEO_USB_PORT,
+        metavar="DEV",
+        help=f"USB CDC Romeo (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä {ROMEO_USB_PORT}; ╨║╨╛╨╜╤ü╤é╨░╨╜╤é╨░ ROMEO_USB_PORT ╨▓ rpi_tools/config.py)",
+    )
+    p_ser.add_argument("--baud", type=int, default=115200, help="╨í╨║╨╛╤Ç╨╛╤ü╤é╤î UART (╤ç╨░╤ü╤é╨╛ 9600 ╨╕╨╗╨╕ 115200)")
+    p_ser.add_argument("--text", default="?", help="╨í╤é╤Ç╨╛╨║╨░ UTF-8 ╨┤╨╗╤Å ╨╛╤é╨┐╤Ç╨░╨▓╨║╨╕")
+    p_ser.add_argument(
+        "-n",
+        "--nl",
+        action="store_true",
+        help="╨¥╨╡╨╛╨▒╤Å╨╖╨░╤é╨╡╨╗╤î╨╜╨╛: ╨┐╨╡╤Ç╨╡╨▓╨╛╨┤ ╤ü╤é╤Ç╨╛╨║╨╕ \\n ╤â╨╢╨╡ ╨┤╨╛╨▒╨░╨▓╨╗╤Å╨╡╤é╤ü╤Å ╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä",
+    )
+    p_ser.add_argument(
+        "--no-nl",
+        action="store_true",
+        help="╨¥╨╡ ╨┤╨╛╨▒╨░╨▓╨╗╤Å╤é╤î \\n ╨▓ ╨║╨╛╨╜╨╡╤å (╤ü╤ï╤Ç╨░╤Å ╤ü╤é╤Ç╨╛╨║╨░/╨╛╨┤╨╕╨╜ ╤ü╨╕╨╝╨▓╨╛╨╗ ╨▒╨╡╨╖ LF)",
+    )
+    p_ser.add_argument(
+        "--read-timeout",
+        type=float,
+        default=3.0,
+        metavar="SEC",
+        help="╨£╨░╨║╤ü╨╕╨╝╤â╨╝ ╤ü╨╡╨║╤â╨╜╨┤ ╨╛╨╢╨╕╨┤╨░╨╜╨╕╤Å ╨╗╤Ä╨▒╤ï╤à ╨▒╨░╨╣╤é ╨╛╤é╨▓╨╡╤é╨░ (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä 3)",
+    )
+    p_ser.add_argument(
+        "--read-idle",
+        type=float,
+        default=0.25,
+        metavar="SEC",
+        help="╨ó╨╕╤ê╨╕╨╜╨░ ╨╜╨░ ╨╗╨╕╨╜╨╕╨╕ ╨┐╨╛╤ü╨╗╨╡ ╨┐╨╛╤ü╨╗╨╡╨┤╨╜╨╡╨│╨╛ ╨▒╨░╨╣╤é╨░ ΓÇö ╨╛╤é╨▓╨╡╤é ╤ü╨╛╨▒╤Ç╨░╨╜ (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä 0.25)",
+    )
+    p_ser.add_argument(
+        "--open-delay",
+        type=float,
+        default=0.0,
+        metavar="SEC",
+        help="╨ƒ╨░╤â╨╖╨░ ╨┐╨╛╤ü╨╗╨╡ ╨╛╤é╨║╤Ç╤ï╤é╨╕╤Å USB-╨┐╨╛╤Ç╤é╨░ ╨┤╨╛ ╨╛╤é╨┐╤Ç╨░╨▓╨║╨╕ (╤ç╨░╤ü╤é╨╛ 1.5ΓÇô2 ╤ü: ╨┐╨╗╨░╤é╨░ ╤â╤ü╨┐╨╡╨▓╨░╨╡╤é ╨▓╤ï╨╣╤é╨╕ ╨╕╨╖ reset)",
+    )
+
+    p_adc = sub.add_parser(
+        "adc-read",
+        help="Romeo USB: ╨╛╨┐╤Ç╨╛╤ü ╨É╨ª╨ƒ A0..A5 ΓÇö ╨╛╨┤╨╜╨░ ╤ü╤é╤Ç╨╛╨║╨░ ┬½A<n> raw mV┬╗ ╨▓ stdout (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä ╨║╨░╨╜╨░╨╗ ╨╕╨╖ config)",
+    )
+    p_adc.add_argument(
+        "--port",
+        default=ROMEO_USB_PORT,
+        metavar="DEV",
+        help=f"USB CDC Romeo (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä {ROMEO_USB_PORT})",
+    )
+    p_adc.add_argument("--baud", type=int, default=115200, help="╨í╨║╨╛╤Ç╨╛╤ü╤é╤î UART")
+    p_adc.add_argument(
+        "--channel",
+        "-c",
+        type=int,
+        default=ROMEO_ADC_DEFAULT_CHANNEL,
+        metavar="N",
+        help=f"╨¥╨╛╨╝╨╡╤Ç ╨▓╤à╨╛╨┤╨░ 0..5 (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä {ROMEO_ADC_DEFAULT_CHANNEL} ΓÇö A{ROMEO_ADC_DEFAULT_CHANNEL})",
+    )
+    p_adc.add_argument(
+        "--read-timeout",
+        type=float,
+        default=3.0,
+        metavar="SEC",
+        help="╨£╨░╨║╤ü╨╕╨╝╤â╨╝ ╤ü╨╡╨║╤â╨╜╨┤ ╨╛╨╢╨╕╨┤╨░╨╜╨╕╤Å ╨╛╤é╨▓╨╡╤é╨░",
+    )
+    p_adc.add_argument(
+        "--read-idle",
+        type=float,
+        default=0.25,
+        metavar="SEC",
+        help="╨ó╨╕╤ê╨╕╨╜╨░ ╨╜╨░ ╨╗╨╕╨╜╨╕╨╕ ╨┐╨╛╤ü╨╗╨╡ ╨┐╨╛╤ü╨╗╨╡╨┤╨╜╨╡╨│╨╛ ╨▒╨░╨╣╤é╨░ ΓÇö ╨╛╤é╨▓╨╡╤é ╤ü╨╛╨▒╤Ç╨░╨╜",
+    )
+    p_adc.add_argument(
+        "--open-delay",
+        type=float,
+        default=0.0,
+        metavar="SEC",
+        help="╨ƒ╨░╤â╨╖╨░ ╨┐╨╛╤ü╨╗╨╡ ╨╛╤é╨║╤Ç╤ï╤é╨╕╤Å ╨┐╨╛╤Ç╤é╨░ ╨┤╨╛ ╨┐╨╡╤Ç╨▓╨╛╨╣ ╨║╨╛╨╝╨░╨╜╨┤╤ï",
+    )
+
+    p_vbat = sub.add_parser(
+        "vbat-read",
+        help="Romeo USB: VBAT ╨╕ battery_V ╤ü ╨║╨░╨╗╨╕╨▒╤Ç╨╛╨▓╨║╨╛╨╣ U=a┬╖U+b (╤ü╨╝. ROMEO_BATTERY_CAL_* ╨▓ config)",
+    )
+    p_vbat.add_argument(
+        "--port",
+        default=ROMEO_USB_PORT,
+        metavar="DEV",
+        help=f"USB CDC Romeo (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä {ROMEO_USB_PORT})",
+    )
+    p_vbat.add_argument("--baud", type=int, default=115200, help="╨í╨║╨╛╤Ç╨╛╤ü╤é╤î UART")
+    p_vbat.add_argument(
+        "--read-timeout",
+        type=float,
+        default=3.0,
+        metavar="SEC",
+        help="╨£╨░╨║╤ü╨╕╨╝╤â╨╝ ╤ü╨╡╨║╤â╨╜╨┤ ╨╛╨╢╨╕╨┤╨░╨╜╨╕╤Å ╨╛╤é╨▓╨╡╤é╨░",
+    )
+    p_vbat.add_argument(
+        "--read-idle",
+        type=float,
+        default=0.25,
+        metavar="SEC",
+        help="╨ó╨╕╤ê╨╕╨╜╨░ ╨╜╨░ ╨╗╨╕╨╜╨╕╨╕ ╨┐╨╛╤ü╨╗╨╡ ╨┐╨╛╤ü╨╗╨╡╨┤╨╜╨╡╨│╨╛ ╨▒╨░╨╣╤é╨░ ΓÇö ╨╛╤é╨▓╨╡╤é ╤ü╨╛╨▒╤Ç╨░╨╜",
+    )
+    p_vbat.add_argument(
+        "--open-delay",
+        type=float,
+        default=0.0,
+        metavar="SEC",
+        help="╨ƒ╨░╤â╨╖╨░ ╨┐╨╛╤ü╨╗╨╡ ╨╛╤é╨║╤Ç╤ï╤é╨╕╤Å ╨┐╨╛╤Ç╤é╨░ ╨┤╨╛ ╨┐╨╡╤Ç╨▓╨╛╨╣ ╨║╨╛╨╝╨░╨╜╨┤╤ï",
+    )
+
+    p_cal = sub.add_parser(
+        "adc-cal",
+        help="Romeo USB: ╨║╨░╨╗╨╕╨▒╤Ç╨╛╨▓╨║╨░ ╨É╨ª╨ƒ ΓÇö VCC, VREF, VREF <mV>, VREF AUTO (╤é╨╡╨║╤ü╤é ╨┐╤Ç╨╛╤ê╨╕╨▓╨║╨╕ ╨▓ stdout)",
+    )
+    p_cal.add_argument(
+        "mode",
+        choices=["vcc", "vref", "vref-auto"],
+        help="vcc ΓÇö AVCC ╨┐╨╛ bandgap; vref ΓÇö ╨╖╨░╨┐╤Ç╨╛╤ü VREF; vref --set MV ΓÇö ╤Ç╤â╤ç╨╜╨╛╨╣ VREF; vref-auto ΓÇö ╨║╨░╨║ VCC",
+    )
+    p_cal.add_argument(
+        "--set",
+        dest="vref_mv",
+        type=int,
+        default=None,
+        metavar="MV",
+        help="╨ó╨╛╨╗╤î╨║╨╛ ╤ü mode=vref: ╨╖╨░╨┤╨░╤é╤î ╨╛╨┐╨╛╤Ç╤â VREF <MV> (500..7000 ╨╝╨Æ)",
+    )
+    p_cal.add_argument(
+        "--port",
+        default=ROMEO_USB_PORT,
+        metavar="DEV",
+        help=f"USB CDC Romeo (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä {ROMEO_USB_PORT})",
+    )
+    p_cal.add_argument("--baud", type=int, default=115200, help="╨í╨║╨╛╤Ç╨╛╤ü╤é╤î UART")
+    p_cal.add_argument(
+        "--read-timeout",
+        type=float,
+        default=5.0,
+        metavar="SEC",
+        help="╨₧╨╢╨╕╨┤╨░╨╜╨╕╨╡ ╨╛╤é╨▓╨╡╤é╨░ (VCC/bandgap ╨╝╨╛╨╢╨╡╤é ╨▒╤ï╤é╤î ╨╝╨╡╨┤╨╗╨╡╨╜╨╜╤ï╨╝; ╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä 5 ╤ü)",
+    )
+    p_cal.add_argument(
+        "--read-idle",
+        type=float,
+        default=0.25,
+        metavar="SEC",
+        help="╨ó╨╕╤ê╨╕╨╜╨░ ╨╜╨░ ╨╗╨╕╨╜╨╕╨╕ ╨┐╨╛╤ü╨╗╨╡ ╨┐╨╛╤ü╨╗╨╡╨┤╨╜╨╡╨│╨╛ ╨▒╨░╨╣╤é╨░ ΓÇö ╨╛╤é╨▓╨╡╤é ╤ü╨╛╨▒╤Ç╨░╨╜",
+    )
+    p_cal.add_argument(
+        "--open-delay",
+        type=float,
+        default=0.0,
+        metavar="SEC",
+        help="╨ƒ╨░╤â╨╖╨░ ╨┐╨╛╤ü╨╗╨╡ ╨╛╤é╨║╤Ç╤ï╤é╨╕╤Å ╨┐╨╛╤Ç╤é╨░ ╨┤╨╛ ╨┐╨╡╤Ç╨▓╨╛╨╣ ╨║╨╛╨╝╨░╨╜╨┤╤ï",
+    )
+
+    p_webrtc = sub.add_parser(
+        "webrtc",
+        help="WebRTC Host: H.264 ╨▓╨╕╨┤╨╡╨╛ + Data Channel ╤â╨┐╤Ç╨░╨▓╨╗╨╡╨╜╨╕╨╡ ╤ç╨╡╤Ç╨╡╨╖ Firebase signaling",
+    )
+    p_webrtc.add_argument(
+        "--firebase-cred",
+        required=True,
+        metavar="PATH",
+        type=_firebase_cred_existing_path,
+        help="╨ƒ╤â╤é╤î ╨║ serviceAccountKey.json ╨╛╤é Firebase",
+    )
+    p_webrtc.add_argument(
+        "--firebase-db-url",
+        required=True,
+        metavar="URL",
+        type=_firebase_rtdb_url,
+        help=(
+            "URL Firebase Realtime Database, "
+            "╨╜╨░╨┐╤Ç╨╕╨╝╨╡╤Ç https://<id>-default-rtdb.firebaseio.com (╨┐╨╛╨┤╨╛╨▒╤Ç╨░╤é╤î: ╨║╨╛╨╝╨░╨╜╨┤╨░ firebase-probe)"
+        ),
+    )
+    p_webrtc.add_argument(
+        "--room",
+        default="pi-camera",
+        metavar="ID",
+        type=_webrtc_room_non_empty,
+        help=(
+            "╨ÿ╨╝╤Å ╨║╨╛╨╝╨╜╨░╤é╤ï ╨▓ RTDB (/rooms/<id>/). ╨ó╨╛ ╨╢╨╡ ╤ü╤é╤Ç╨╛╨║╨╛╨╣ ╨▓ HTML ╨╛╨┐╨╡╤Ç╨░╤é╨╛╤Ç╨░; "
+            "╨╡╤ü╨╗╨╕ ╨▒╤Ç╨░╤â╨╖╨╡╤Ç ╨┐╨╕╤ê╨╡╤é ╨▓ pi-cam-2 ΓÇö ╨╖╨░╨┐╤â╤ü╨║: --room pi-cam-2"
+        ),
+    )
+    p_webrtc.add_argument("--width", type=int, default=1280, help="╨¿╨╕╤Ç╨╕╨╜╨░ ╨║╨░╨┤╤Ç╨░ (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä 1280)")
+    p_webrtc.add_argument("--height", type=int, default=720, help="╨Æ╤ï╤ü╨╛╤é╨░ ╨║╨░╨┤╤Ç╨░ (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä 720)")
+    p_webrtc.add_argument("--fps", type=float, default=30.0, help="FPS (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä 30)")
+    p_webrtc.add_argument(
+        "--video-bitrate",
+        type=int,
+        default=4_000_000,
+        metavar="BPS",
+        help="╨æ╨╕╤é╤Ç╨╡╨╣╤é H.264 ╨▓ ╨▒╨╕╤é/╤ü (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä 4000000 = 4 ╨£╨▒╨╕╤é/╤ü)",
+    )
+    p_webrtc.add_argument(
+        "--video-intra",
+        type=int,
+        default=30,
+        metavar="N",
+        help="╨ÿ╨╜╤é╨╡╤Ç╨▓╨░╨╗ I-frame / IDR (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä 30)",
+    )
+    p_webrtc.add_argument(
+        "--video-profile",
+        choices=["baseline", "main", "high"],
+        default="baseline",
+        help=(
+            "H.264 ╨┐╤Ç╨╛╤ä╨╕╨╗╤î ╨┤╨╗╤Å rpicam ╨┐╨╡╤Ç╨╡╨┤ RTP (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä baseline ΓÇö ╨╗╤â╤ç╤ê╨╡ ╤ü ╨┤╨╡╨║╨╛╨┤╨╡╤Ç╨░╨╝╨╕ ╨▒╤Ç╨░╤â╨╖╨╡╤Ç╨░)"
+        ),
+    )
+    p_webrtc.add_argument(
+        "--romeo-usb",
+        default=None,
+        metavar="DEV",
+        help=f"USB CDC Romeo (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä {ROMEO_USB_PORT})",
+    )
+    p_webrtc.add_argument("--romeo-baud", type=int, default=115200, help="╨í╨║╨╛╤Ç╨╛╤ü╤é╤î UART Romeo")
+    p_webrtc.add_argument(
+        "--romeo-tank-speed",
+        type=int,
+        default=ROMEO_TANK_SPEED_DEFAULT,
+        metavar="N",
+        help="╨æ╨░╨╖╨╛╨▓╤ï╨╣ ╨╝╨╛╨┤╤â╨╗╤î ╨┤╨╗╤Å JSON drive left/right",
+    )
+    p_webrtc.add_argument(
+        "--romeo-turret-step",
+        type=int,
+        default=None,
+        metavar="DEG",
+        help="╨¿╨░╨│ ╨▒╨░╤ê╨╜╨╕ ╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä ╨┤╨╗╤Å action=turret",
+    )
+    p_webrtc.add_argument(
+        "--room-only",
+        action="store_true",
+        dest="webrtc_room_only",
+        help=(
+            "╨ó╨╛╨╗╤î╨║╨╛ ╨╖╨░╨┐╨╕╤ü╨░╤é╤î ╨▓ RTDB /rooms/<--room>/status=waiting ╨╕ ╨▓╤ï╨╣╤é╨╕ "
+            "(╨▒╨╡╨╖ ╨║╨░╨╝╨╡╤Ç╤ï ╨╕ aiortc; ╨┐╤Ç╨╛╨▓╨╡╤Ç╨╕╤é╤î cred ╨╕ --firebase-db-url ╨╜╨░ Pi)"
+        ),
+    )
+    p_webrtc.add_argument(
+        "--ice-config-url",
+        default=os.environ.get("ICE_CONFIG_URL") or "",
+        metavar="URL",
+        help=(
+            "HTTP(S) GET JSON ╤ü ╨┐╨╛╨╗╨╡╨╝ iceServers (╨║╨░╨║ GET /api/ice ╨╜╨░ VPS). "
+            "╨ƒ╤â╤ü╤é╨╛ ΓÇö ╤é╨╛╨╗╤î╨║╨╛ ╨▓╤ü╤é╤Ç╨╛╨╡╨╜╨╜╤ï╨╣ Google STUN. ╨ƒ╨╡╤Ç╨╡╨╝╨╡╨╜╨╜╨░╤Å ╨╛╨║╤Ç╤â╨╢╨╡╨╜╨╕╤Å: ICE_CONFIG_URL."
+        ),
+    )
+    p_webrtc.add_argument(
+        "--ice-config-token",
+        default=os.environ.get("ICE_CONFIG_TOKEN") or "",
+        metavar="SECRET",
+        help=(
+            "╨ó╨╛╨║╨╡╨╜ ╨┤╨╗╤Å ICE API: ╨╖╨░╨│╨╛╨╗╨╛╨▓╨╛╨║ Authorization: Bearer ΓÇª ╨╕ ╨┤╤â╨▒╨╗╨╕╤Ç╨╛╨▓╨░╨╜╨╕╨╡ ╨▓ ?token= "
+            "╨╡╤ü╨╗╨╕ ╨▓ URL ╨╡╤ë╤æ ╨╜╨╡╤é token=. ╨ƒ╨╡╤Ç╨╡╨╝╨╡╨╜╨╜╨░╤Å: ICE_CONFIG_TOKEN (chmod 600 ╨╜╨░ Pi)."
+        ),
+    )
+    p_webrtc.add_argument(
+        "--no-ice-merge-stun",
+        action="store_true",
+        dest="webrtc_no_ice_merge_stun",
+        help="╨¥╨╡ ╨┤╨╛╨▒╨░╨▓╨╗╤Å╤é╤î ╨┐╤â╨▒╨╗╨╕╤ç╨╜╤ï╨╣ STUN ╨┐╨╛╤ü╨╗╨╡ ╤ü╨┐╨╕╤ü╨║╨░ ╤ü ICE API (╤é╨╛╨╗╤î╨║╨╛ ╤é╨╛, ╤ç╤é╨╛ ╨▓╨╡╤Ç╨╜╤â╨╗ ╤ü╨╡╤Ç╨▓╨╡╤Ç).",
+    )
+    p_webrtc.add_argument(
+        "--ice-vps-only",
+        action="store_true",
+        dest="webrtc_ice_vps_only",
+        help=(
+            "╨á╨╡╨╢╨╕╨╝ ╨╛╤é╨╗╨░╨┤╨║╨╕ ┬½╤é╨╛╨╗╤î╨║╨╛ ╤ç╨╡╤Ç╨╡╨╖ Hetzner┬╗: ICE API ╨╛╨▒╤Å╨╖╨░╤é╨╡╨╗╨╡╨╜, ╨▒╨╡╨╖ fallback ╨╜╨░ Google STUN, "
+            "╨╕╨╖ ╨╛╤é╨▓╨╡╤é╨░ API ╤é╨╛╨╗╤î╨║╨╛ turn: (relay). ╨¡╨║╨▓╨╕╨▓╨░╨╗╨╡╨╜╤é --no-ice-merge-stun + ╨╢╤æ╤ü╤é╨║╨░╤Å ╨┐╤Ç╨╛╨▓╨╡╤Ç╨║╨░ API."
+        ),
+    )
+    p_webrtc.add_argument(
+        "--ice-fetch-timeout",
+        type=float,
+        default=8.0,
+        metavar="SEC",
+        help="╨ó╨░╨╣╨╝╨░╤â╤é HTTP ╨╖╨░╨┐╤Ç╨╛╤ü╨░ ╨╖╨░ ICE JSON (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä 8 ╤ü).",
+    )
+    # ╨ô╨╗╨╛╨▒╨░╨╗╤î╨╜╤ï╨╣ -v ╨╖╨░╨┤╨░╤æ╤é╤ü╤Å *╨┤╨╛* ╨┐╨╛╨┤╨║╨╛╨╝╨░╨╜╨┤╤ï; ╨┤╤â╨▒╨╗╤î ╨╖╨┤╨╡╤ü╤î ΓÇö ╤ç╤é╨╛╨▒╤ï ╤Ç╨░╨▒╨╛╤é╨░╨╗╨╛ ``webrtc ΓÇª -v`` (╤é╨╕╨┐╨╕╤ç╨╜╨╛ ╨▓ Run/Debug).
+    p_webrtc.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        dest="webrtc_verbose",
+        help=(
+            "╨ú╤ü╨╕╨╗╨╕╤é╤î ╨╗╨╛╨│╨╕╤Ç╨╛╨▓╨░╨╜╨╕╨╡ ╨┤╨╛ DEBUG (╤ü╤â╨╝╨╝╨╕╤Ç╤â╨╡╤é╤ü╤Å ╤ü ╨╛╨▒╤ë╨╕╨╝ ``-v``, ╨╡╤ü╨╗╨╕ ╨╛╨╜ ╨┐╨╡╤Ç╨╡╨┤ webrtc)"
+        ),
+    )
+
+    p_fb_probe = sub.add_parser(
+        "firebase-probe",
+        help="╨ƒ╨╛╨┤╨╛╨▒╤Ç╨░╤é╤î Firebase Realtime Database URL ╨╕ ╨┐╤Ç╨╛╨▓╨╡╤Ç╨╕╤é╤î ╨╖╨░╨┐╨╕╤ü╤î ╨▓ rooms/<id> (╨┤╨╕╨░╨│╨╜╨╛╤ü╤é╨╕╨║╨░ WebRTC signaling)",
+    )
+    p_fb_probe.add_argument(
+        "--firebase-cred",
+        required=True,
+        metavar="PATH",
+        dest="firebase_cred_probe",
+        type=_firebase_cred_existing_path,
+        help="serviceAccountKey.json (╤é╨╛╤é ╨╢╨╡ ╤ä╨░╨╣╨╗, ╤ç╤é╨╛ ╨┤╨╗╤Å webrtc)",
+    )
+    p_fb_probe.add_argument(
+        "--room",
+        default="pi-camera",
+        metavar="ID",
+        dest="firebase_room_probe",
+        help="╨ÿ╨╝╤Å ╨║╨╛╨╝╨╜╨░╤é╤ï ╨┤╨╗╤Å ╤é╨╡╤ü╤é╨╛╨▓╨╛╨╣ ╨╖╨░╨┐╨╕╤ü╨╕ (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä pi-camera)",
+    )
+    p_fb_probe.add_argument(
+        "--firebase-db-url",
+        default=None,
+        metavar="URL",
+        dest="firebase_db_url_override",
+        help="╨ƒ╤Ç╨╛╨▓╨╡╤Ç╨╕╤é╤î ╤é╨╛╨╗╤î╨║╨╛ ╤ì╤é╨╛╤é URL (╨▒╨╡╨╖ ╨┐╨╡╤Ç╨╡╨▒╨╛╤Ç╨░ ╤Ç╨╡╨│╨╕╨╛╨╜╨╛╨▓)",
+    )
+
+    try:
+        args = parser.parse_args()
+    except ArgparseCliExit as cli_ex:
+        c = cli_ex.code
+        if c is None:
+            return 0
+        if isinstance(c, int):
+            return c
+        return 1
+    except argparse.ArgumentError as exc:
+        _print_usage_chain_for_cli_error(parser, sys.argv)
+        print(f"{parser.prog}: error: {exc}\n", file=sys.stderr, end="")
+        return 2
+
+    if args.cmd == "send":
+        apply_stream_preset(args)
+
+    # ╨á╨░╨╜╨╜╤Å╤Å ╨┤╨╕╨░╨│╨╜╨╛╤ü╤é╨╕╨║╨░ ╨▒╨╡╨╖ ╨╗╨╕╤ê╨╜╨╕╤à ╤ü╤é╤Ç╨╛╨║ camstream INFO
+    if args.cmd == "firebase-probe":
+        from rpi_tools.firebase_probe import run_firebase_rtdb_probe
+
+        return run_firebase_rtdb_probe(
+            args.firebase_cred_probe,
+            args.firebase_room_probe,
+            database_url_override=args.firebase_db_url_override,
+        )
+
+    _vv = args.verbose + getattr(args, "webrtc_verbose", 0)
+    level = logging.DEBUG if _vv else getattr(logging, args.log_level)
+    setup_logging(level)
+    log.info("camstream: ╨║╨╛╨╝╨░╨╜╨┤╨░=%s, ╤â╤Ç╨╛╨▓╨╡╨╜╤î ╨╗╨╛╨│╨╛╨▓=%s", args.cmd, logging.getLevelName(level))
+
+    if args.cmd == "wifi-scan":
+        run_wifi_scan()
+        return 0
+
+    if args.cmd == "wifi-connect":
+        run_wifi_connect(
+            args.ssid,
+            args.password,
+            args.password_file,
+            args.ifname,
+            args.hidden,
+        )
+        return 0
+
+    if args.cmd == "wifi-apply":
+        run_wifi_apply_from_file(args.env_file)
+        return 0
+
+    if args.cmd == "wifi-hotspot":
+        ap_rc = run_wifi_hotspot(
+            args.ssid,
+            ap_password_resolve(args.password),
+            args.ifname,
+            require_ethernet_uplink=not args.force,
+        )
+        if ap_rc == 2:
+            _print_hotspot_blocked_hint()
+        return ap_rc
+
+    if args.cmd == "flash-romeo":
+        run_flash_romeo(args.hex)
+        return 0
+
+    if args.cmd == "adc-read":
+        run_adc_read(
+            args.port,
+            args.baud,
+            args.channel,
+            args.read_timeout,
+            args.read_idle,
+            args.open_delay,
+        )
+        return 0
+
+    if args.cmd == "vbat-read":
+        run_vbat_read(
+            args.port,
+            args.baud,
+            args.read_timeout,
+            args.read_idle,
+            args.open_delay,
+        )
+        return 0
+
+    if args.cmd == "adc-cal":
+        if args.mode == "vref" and args.vref_mv is not None:
+            if not (500 <= args.vref_mv <= 7000):
+                log.error("adc-cal: --set MV ╨┤╨╛╨╗╨╢╨╜╨╛ ╨▒╤ï╤é╤î ╨▓ ╨┤╨╕╨░╨┐╨░╨╖╨╛╨╜╨╡ 500..7000")
+                return 1
+        if args.mode == "vref-auto" and args.vref_mv is not None:
+            log.warning("adc-cal: --set ╨╕╨│╨╜╨╛╤Ç╨╕╤Ç╤â╨╡╤é╤ü╤Å ╨┤╨╗╤Å vref-auto")
+        run_adc_cal(
+            args.port,
+            args.baud,
+            args.mode,
+            args.vref_mv if args.mode == "vref" else None,
+            args.read_timeout,
+            args.read_idle,
+            args.open_delay,
+        )
+        return 0
+
+    if args.cmd in ("serial-send", "romeo"):
+        append_lf = not args.no_nl
+        run_serial_send(
+            args.port,
+            args.baud,
+            args.text,
+            append_lf,
+            args.read_timeout,
+            args.read_idle,
+            args.open_delay,
+        )
+        return 0
+
+    if args.cmd == "webrtc":
+        import asyncio
+
+        if args.webrtc_room_only:
+
+            async def _webrtc_room_only() -> None:
+                import time
+
+                from rpi_tools.webrtc_signaling import FirebaseSignaling, init_firebase
+
+                init_firebase(args.firebase_cred, args.firebase_db_url)
+                await FirebaseSignaling(args.room).reset_room_for_host_launch(
+                    int(time.time() * 1000)
+                )
+
+            try:
+                asyncio.run(_webrtc_room_only())
+            except Exception:
+                log.exception(
+                    "webrtc --room-only: ╨╖╨░╨┐╨╕╤ü╤î ╨║╨╛╨╝╨╜╨░╤é╤ï ╨╜╨╡ ╤â╨┤╨░╨╗╨░╤ü╤î "
+                    "(╤ü╨╝. ╨▓╤ï╤ê╨╡; ╤ü╤Ç╨░╨▓╨╜╨╕╤é╨╡ URL ╤ü ╤Ç╨╡╨╖╤â╨╗╤î╤é╨░╤é╨╛╨╝ firebase-probe)"
+                )
+                return 1
+            log.info(
+                "webrtc --room-only: ╨╛╨║. ╨Æ Firebase Console ╨╛╤é╨║╤Ç╨╛╨╣╤é╨╡ Realtime Database ╨╕ ╤â╨╖╨╡╨╗ rooms/%s",
+                args.room,
+            )
+            return 0
+
+        try:
+            from rpi_tools.camera_stream import _CameraControlState, _make_camera_control_handler
+            from rpi_tools.webrtc_host import run_webrtc_host
+            from rpi_tools.romeo_usb import romeo_exchange
+        except ModuleNotFoundError as e:
+            mod = getattr(e, "name", "") or ""
+            pip_hint = "`pip install -r requirements.txt` ΓÇö ╨┐╨╛╨╗╨╜╤ï╨╣ ╤ü╨┐╨╕╤ü╨╛╨║ ╨┤╨╗╤Å Pi/WebRTC/Firebase."
+            if mod == "firebase_admin":
+                pip_hint = (
+                    "`pip install firebase-admin` (╨┐╨░╨║╨╡╤é ╨╕╨╝╨┐╨╛╤Ç╤é╨╕╤Ç╤â╨╡╤é╤ü╤Å ╨║╨░╨║ firebase_admin) "
+                    "╨╕╨╗╨╕ `pip install -r requirements.txt`."
+                )
+            elif mod in ("aiortc", "av"):
+                pip_hint = "`pip install aiortc av` ╨╕╨╗╨╕ `pip install -r requirements.txt`."
+            log.error(
+                "╨ö╨╗╤Å ╤Ç╨╡╨╢╨╕╨╝╨░ ┬½webrtc┬╗ ╨╜╨╡ ╤â╤ü╤é╨░╨╜╨╛╨▓╨╗╨╡╨╜ ╨╝╨╛╨┤╤â╨╗╤î %r (%s). "
+                "╨Æ╤ï╨▒╨╡╤Ç╨╕╤é╨╡ ╨╕╨╜╤é╨╡╤Ç╨┐╤Ç╨╡╤é╨░╤é╨╛╤Ç ╤é╨╛╨│╨╛ venv, ╨│╨┤╨╡ ╤ü╤é╨╛╤Å╤é ╨╖╨░╨▓╨╕╤ü╨╕╨╝╨╛╤ü╤é╨╕ (╤ç╨░╤ü╤é╨╛ ./.venv/bin/python), ╨╖╨░╤é╨╡╨╝: %s",
+                mod,
+                e,
+                pip_hint,
+            )
+            print(
+                "camstream: ╨╜╨╡╤é ╨╝╨╛╨┤╤â╨╗╤Å ╨┤╨╗╤Å webrtc. ╨Æ Cursor: ╨▓╤ï╨▒╨╡╤Ç╨╕╤é╨╡ ╨╕╨╜╤é╨╡╤Ç╨┐╤Ç╨╡╤é╨░╤é╨╛╤Ç .venv ╨┐╤Ç╨╛╨╡╨║╤é╨░ "
+                "╨╕ ╨▓╤ï╨┐╨╛╨╗╨╜╨╕╤é╨╡: pip install -r requirements.txt",
+                file=sys.stderr,
+            )
+            return 1
+
+        camera_state = _CameraControlState()
+        camera_handler = _make_camera_control_handler(camera_state)
+
+        romeo_usb = args.romeo_usb or ROMEO_USB_PORT
+        romeo_baud = args.romeo_baud
+        tank_speed = args.romeo_tank_speed
+        turret_step = args.romeo_turret_step
+
+        # Data Channel ╨┐╤Ç╨╕╨╜╨╕╨╝╨░╨╡╤é ╤é╨╛╤é ╨╢╨╡ JSON, ╤ç╤é╨╛ Romeo TCP-╤ü╨╡╤Ç╨▓╨╡╤Ç; ╨┐╤Ç╨╕╨╝╨╡╤Ç ╨┤╨╗╤Å ╨▒╤Ç╨░╤â╨╖╨╡╤Ç╨░:
+        # examples/webrtc_browser_control_keys.js (WASD drive, ╤ü╤é╤Ç╨╡╨╗╨║╨╕ ΓåÆ turret_smooth / turret_stop).
+        def _webrtc_command_handler(obj: dict) -> dict:
+            cam_result = camera_handler(obj)
+            if cam_result is not None:
+                return cam_result
+            from rpi_tools.romeo_control_server import _json_to_romeo_lines
+            try:
+                lines = _json_to_romeo_lines(obj, tank_speed, turret_step)
+            except ValueError as e:
+                return {"ok": False, "error": str(e)}
+            parts: list[str] = []
+            for cmd_line in lines:
+                try:
+                    chunk = romeo_exchange(
+                        romeo_usb, romeo_baud, cmd_line,
+                        append_lf=True, read_timeout=0.45, read_idle=0.03,
+                    )
+                    if chunk:
+                        parts.append(chunk.decode("utf-8", errors="replace"))
+                except (OSError, RuntimeError) as e:
+                    return {"ok": False, "error": str(e)}
+            return {"ok": True, "reply": "".join(parts)}
+
+        camera_extra = camera_state.build_rpicam_args()
+
+        ice_vps_only = bool(getattr(args, "webrtc_ice_vps_only", False))
+        ice_url = (args.ice_config_url or "").strip() or None
+        ice_token = (args.ice_config_token or "").strip() or None
+        if ice_vps_only:
+            if not ice_url or not ice_token:
+                print(
+                    "webrtc --ice-vps-only: ╨╜╤â╨╢╨╜╤ï ICE_CONFIG_URL ╨╕ ICE_CONFIG_TOKEN "
+                    "(config/webrtc.ice.local.env ╨╕╨╗╨╕ --ice-config-url / --ice-config-token).",
+                    file=sys.stderr,
+                )
+                return 2
+
+        try:
+            asyncio.run(run_webrtc_host(
+                firebase_cred=args.firebase_cred,
+                firebase_db_url=args.firebase_db_url,
+                room_id=args.room,
+                width=args.width,
+                height=args.height,
+                fps=args.fps,
+                bitrate=args.video_bitrate,
+                intra=args.video_intra,
+                profile=args.video_profile,
+                camera_extra_args=camera_extra,
+                command_handler=_webrtc_command_handler,
+                ice_config_url=ice_url,
+                ice_config_token=ice_token,
+                ice_merge_public_stun=not (
+                    args.webrtc_no_ice_merge_stun or ice_vps_only
+                ),
+                ice_fetch_timeout_sec=float(args.ice_fetch_timeout),
+                ice_config_required=ice_vps_only,
+                ice_turn_only=ice_vps_only,
+            ))
+        except KeyboardInterrupt:
+            log.info("webrtc: ╨╛╤ü╤é╨░╨╜╨╛╨▓╨║╨░ ╨┐╨╛ Ctrl+C")
+        return 0
+
+    if args.cmd == "send":
+        if args.ap_ssid:
+            ap_rc = run_wifi_hotspot(
+                args.ap_ssid,
+                ap_password_resolve(args.ap_password),
+                args.ap_ifname,
+                require_ethernet_uplink=not args.ap_force,
+            )
+            if ap_rc == 2:
+                _print_hotspot_blocked_hint()
+            if ap_rc != 0:
+                return ap_rc
+        if args.listen and args.host.strip().lower() not in ("auto", "discover"):
+            print(
+                "╨ƒ╤Ç╨╕ --listen ╨┐╨░╤Ç╨░╨╝╨╡╤é╤Ç --host ╨╜╨╡ ╨╕╤ü╨┐╨╛╨╗╤î╨╖╤â╨╡╤é╤ü╤Å (╨║╨╗╨╕╨╡╨╜╤é╤ï ╨┐╨╛╨┤╨║╨╗╤Ä╤ç╨░╤Ä╤é╤ü╤Å ╨║ ╤ì╤é╨╛╨╝╤â Pi).",
+                file=sys.stderr,
+            )
+        if args.listen:
+            listen_disc = None if args.no_discovery or args.discover_port == 0 else args.discover_port
+        else:
+            listen_disc = None
+        try:
+            run_send(
+                args.host,
+                args.port,
+                args.camera,
+                args.width,
+                args.height,
+                args.fps,
+                args.jpeg_quality,
+                args.discover_port,
+                args.discover_token,
+                args.discover_timeout,
+                args.discover_index,
+                args.discover_loop,
+                args.discover_loop_interval,
+                args.listen,
+                listen_disc,
+                None,
+                args.timestamp,
+                args.camera_device,
+                args.capture_backend,
+                not args.no_set_fps,
+                args.capture,
+                video_mode=args.video_mode,
+                video_bitrate=args.video_bitrate,
+                video_intra=args.video_intra,
+                video_profile=args.video_profile,
+                rtsp_path=args.rtsp_path,
+                video_level=args.video_level,
+                romeo_control_port=args.romeo_control_port,
+                romeo_usb_port=args.romeo_usb,
+                romeo_baud=args.romeo_baud,
+                romeo_open_delay=args.romeo_open_delay,
+                romeo_tank_speed=args.romeo_tank_speed,
+                romeo_turret_step=args.romeo_turret_step,
+                romeo_led_interval_sec=args.romeo_led_interval,
+                romeo_adc_interval_sec=args.romeo_adc_interval,
+                picamera_use_jpeg_encoder=not args.legacy_picamera_jpeg_loop,
+                jpeg_chroma_subsampling=args.jpeg_chroma,
+                jpeg_encoder_threads=args.jpeg_threads,
+                jpeg_fast_dct=not args.no_jpeg_fast_dct,
+                jpeg_tcp_queue_depth=args.jpeg_tcp_queue,
+            )
+        except TcpBindError:
+            return 3
+        return 0
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+=====FILE /home/pavel/projects/Mobile_Raspberry_5-/rpi_tools/firebase_probe.py =====
+"""╨ö╨╕╨░╨│╨╜╨╛╤ü╤é╨╕╨║╨░ Firebase Realtime Database: ╨┐╨╛╨┤╨▒╨╛╤Ç databaseURL ╨╕ ╨┐╤Ç╨╛╨▓╨╡╤Ç╨║╨░ ╨╖╨░╨┐╨╕╤ü╨╕ ╨▓ /rooms/{id}."""
+
+from __future__ import annotations
+
+import json
+import sys
+import time
+from pathlib import Path
+
+
+def _project_id_from_cred(cred_path: str) -> str:
+    meta = json.loads(Path(cred_path).expanduser().read_text(encoding="utf-8"))
+    pid = meta.get("project_id")
+    if not pid:
+        raise ValueError("╨Æ JSON ╤ü╨╡╤Ç╨▓╨╕╤ü╨╜╨╛╨│╨╛ ╨░╨║╨║╨░╤â╨╜╤é╨░ ╨╜╨╡╤é ╨┐╨╛╨╗╤Å project_id")
+    return str(pid)
+
+
+def _candidate_urls(project_id: str) -> list[str]:
+    pid = project_id.strip()
+    return [
+        f"https://{pid}-default-rtdb.firebaseio.com",
+        f"https://{pid}-default-rtdb.europe-west1.firebasedatabase.app",
+        f"https://{pid}-default-rtdb.us-central1.firebasedatabase.app",
+        f"https://{pid}-default-rtdb.asia-southeast1.firebasedatabase.app",
+        f"https://{pid}.firebaseio.com",
+    ]
+
+
+def run_firebase_rtdb_probe(
+    cred_path: str,
+    room_id: str,
+    *,
+    database_url_override: str | None = None,
+) -> int:
+    """
+    ╨ƒ╤Ç╨╛╨▒╤â╨╡╤é databaseURL ╨╕ ╨╕╨╝╨╕╤é╨╕╤Ç╤â╨╡╤é create_room ╨║╨░╨║ ╨▓ FirebaseSignaling.
+    ╨Ü╨╛╨┤ 0 ╨┐╤Ç╨╕ ╤â╤ü╨┐╨╡╤à╨╡, 1 ╨╡╤ü╨╗╨╕ ╨╜╨╕ ╨╛╨┤╨╕╨╜ URL ╨╜╨╡ ╨┐╨╛╨┤╨╛╤ê╤æ╨╗.
+    """
+    try:
+        import firebase_admin
+        from firebase_admin import credentials, db as rtdb
+    except ImportError:
+        print(
+            "╨¥╨╡╤é ╨┐╨░╨║╨╡╤é╨░ firebase_admin: pip install firebase-admin (╨▓ venv ╨╜╨░ Pi)",
+            file=sys.stderr,
+        )
+        return 1
+
+    cred_path_exp = str(Path(cred_path).expanduser())
+    if not Path(cred_path_exp).is_file():
+        print(f"╨ñ╨░╨╣╨╗ ╨║╨╗╤Ä╤ç╨░ ╨╜╨╡ ╨╜╨░╨╣╨┤╨╡╨╜: {cred_path_exp}", file=sys.stderr)
+        return 1
+
+    cred = credentials.Certificate(cred_path_exp)
+    project_id = _project_id_from_cred(cred_path_exp)
+    urls: list[str] = (
+        [database_url_override.strip()] if database_url_override else _candidate_urls(project_id)
+    )
+
+    print(f"project_id ╨╕╨╖ ╨║╨╗╤Ä╤ç╨░: {project_id}")
+    print(f"╨ƒ╤Ç╨╛╨▓╨╡╤Ç╨║╨░ ╨╖╨░╨┐╨╕╤ü╨╕ ╨╕ ╤â╨╖╨╗╨░ rooms/{room_id}ΓÇª")
+
+    last_err: str | None = None
+    for url in urls:
+        try:
+            try:
+                firebase_admin.delete_app(firebase_admin.get_app())
+            except ValueError:
+                pass
+            firebase_admin.initialize_app(cred, {"databaseURL": url})
+            probe_ref = rtdb.reference("/_camstream_firebase_probe")
+            probe_ref.set({"t": time.time()})
+            probe_ref.delete()
+
+            base = rtdb.reference(f"/rooms/{room_id}")
+            try:
+                base.delete()
+            except Exception:
+                pass
+            base.child("status").set("waiting")
+            snap = base.get()
+
+            print()
+            print("╨ú╨í╨ƒ╨ò╨Ñ. ╨ú╨║╨░╨╢╨╕╤é╨╡ ╨▓ webrtc ╨╕╨╝╨╡╨╜╨╜╨╛:")
+            print(f"  --firebase-db-url {url}")
+            print()
+            print("╨Ü╨╛╨╜╤ü╨╛╨╗╤î: Firebase ΓåÆ Build ΓåÆ Realtime Database ΓåÆ Data (╨╜╨╡ Firestore!)")
+            print(f"╨ƒ╤â╤é╤î: rooms ΓåÆ {room_id} ΓåÆ ╤ü╤é╨░╤é╤â╤ü ╨╖╨░╨┐╨╕╤ü╨░╨╜:", snap)
+            try:
+                firebase_admin.delete_app(firebase_admin.get_app())
+            except Exception:
+                pass
+            return 0
+        except Exception as e:
+            last_err = f"{url}: {type(e).__name__}: {e}"
+            print(f"  ├ù {last_err}")
+
+    print("\n╨¥╨╕ ╨╛╨┤╨╕╨╜ databaseURL ╨╜╨╡ ╨┤╨░╨╗ ╨╖╨░╨┐╨╕╤ü╨░╤é╤î ╨┤╨░╨╜╨╜╤ï╨╡.", file=sys.stderr)
+    print("╨ú╨▒╨╡╨┤╨╕╤é╨╡╤ü╤î, ╤ç╤é╨╛ ╨▓ ╨┐╤Ç╨╛╨╡╨║╤é╨╡ ╤ü╨╛╨╖╨┤╨░╨╜╨░ Realtime Database.", file=sys.stderr)
+    if last_err:
+        print(f"╨ƒ╨╛╤ü╨╗╨╡╨┤╨╜╤Å╤Å ╨╛╤ê╨╕╨▒╨║╨░: {last_err}", file=sys.stderr)
+    return 1
+

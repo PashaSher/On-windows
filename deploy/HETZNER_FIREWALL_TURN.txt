@@ -1,0 +1,15 @@
+TURN (coturn) на VPS — порты для Hetzner Firewall / Robot
+=========================================================
+
+Если signaling (Firebase) работает, а ICE падает через ~15 с (checking → failed),
+часто заблокированы UDP-порты relay coturn.
+
+В Robot / Cloud Console → Firewall → правила INBOUND:
+
+  TCP  3478        (TURN signaling)
+  UDP  3478        (TURN)
+  UDP  49160-65535 (relay media, см. min-port/max-port в /etc/turnserver.conf)
+
+Уже должны быть открыты: TCP 80, 443, 8788 (страница оператора и ICE API).
+
+После изменения firewall переподключите браузер (Connect).

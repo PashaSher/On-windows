@@ -20,9 +20,25 @@
         }
       },
       "presentation": {
-        "reveal": "silent",
-        "panel": "dedicated"
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": false
       }
+    },
+    {
+      "label": "webrtc-dev-open-browser",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}/scripts/start_webrtc_dev_server.ps1",
+        "-NoBrowser"
+      ],
+      "options": { "cwd": "${workspaceFolder}" },
+      "dependsOn": ["webrtc-operator-serve"]
     }
   ]
 }

@@ -1,0 +1,106 @@
+# /etc/nginx/sites-available/operator-web
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name 116.203.148.254 _;
+
+    root /var/www/operator;
+    index webrtc-client.html;
+
+    location / {
+        try_files $uri $uri/ /webrtc-client.html;
+        add_header Cache-Control "no-store";
+    }
+
+    location /api/operator-bootstrap {
+        proxy_pass http://127.0.0.1:8788/api/operator-bootstrap;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        add_header Cache-Control "no-store" always;
+        add_header Access-Control-Allow-Origin * always;
+    }
+
+    location /api/signal/ {
+        proxy_pass http://127.0.0.1:8788/api/signal/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_read_timeout 90s;
+        add_header Access-Control-Allow-Origin * always;
+        add_header Access-Control-Allow-Methods "GET, PUT, POST, DELETE, OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Authorization, Content-Type, X-Clear" always;
+    }
+
+    location = /cam {
+        return 302 /webrtc-client.html?room=pi-camera&autostart=1&share=1;
+    }
+
+    location /api/ice {
+        if ($request_method = OPTIONS) {
+            add_header Access-Control-Allow-Origin *;
+            add_header Access-Control-Allow-Methods "GET, OPTIONS";
+            add_header Access-Control-Allow-Headers "Authorization, Content-Type";
+            return 204;
+        }
+        proxy_pass http://127.0.0.1:8788/api/ice;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        add_header Access-Control-Allow-Origin * always;
+        add_header Access-Control-Allow-Methods "GET, OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Authorization, Content-Type" always;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name 116.203.148.254 _;
+
+    ssl_certificate     /etc/nginx/ssl/operator-selfsigned.crt;
+    ssl_certificate_key /etc/nginx/ssl/operator-selfsigned.key;
+
+    root /var/www/operator;
+    index webrtc-client.html;
+
+    location / {
+        try_files $uri $uri/ /webrtc-client.html;
+        add_header Cache-Control "no-store";
+    }
+
+    location /api/operator-bootstrap {
+        proxy_pass http://127.0.0.1:8788/api/operator-bootstrap;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        add_header Cache-Control "no-store" always;
+        add_header Access-Control-Allow-Origin * always;
+    }
+
+    location /api/signal/ {
+        proxy_pass http://127.0.0.1:8788/api/signal/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_read_timeout 90s;
+        add_header Access-Control-Allow-Origin * always;
+        add_header Access-Control-Allow-Methods "GET, PUT, POST, DELETE, OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Authorization, Content-Type, X-Clear" always;
+    }
+
+    location = /cam {
+        return 302 /webrtc-client.html?room=pi-camera&autostart=1&share=1;
+    }
+
+    location /api/ice {
+        if ($request_method = OPTIONS) {
+            add_header Access-Control-Allow-Origin *;
+            add_header Access-Control-Allow-Methods "GET, OPTIONS";
+            add_header Access-Control-Allow-Headers "Authorization, Content-Type";
+            return 204;
+        }
+        proxy_pass http://127.0.0.1:8788/api/ice;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        add_header Access-Control-Allow-Origin * always;
+        add_header Access-Control-Allow-Methods "GET, OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Authorization, Content-Type" always;
+    }
+}

@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Romeo WebRTC — Hetzner relay only</title>
+    <script>
+        window.WEBRTC_OPERATOR_PROFILE = "hetzner-relay-only";
+        (function () {
+            const base = "webrtc-client.html";
+            const qs = new URLSearchParams(window.location.search);
+            qs.set("profile", "hetzner-relay-only");
+            location.replace(base + "?" + qs.toString());
+        })();
+    </script>
+</head>
+<body style="background:#1a1a2e;color:#e0e0e0;font-family:system-ui;padding:2rem;">
+    <p>Открывается режим «только Hetzner»…</p>
+</body>
+</html>

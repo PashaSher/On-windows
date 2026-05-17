@@ -1,0 +1,357 @@
+﻿820:    p_webrtc.add_argument(
+821:        "-v",
+822:        "--verbose",
+823:        action="count",
+824:        default=0,
+825:        dest="webrtc_verbose",
+826:        help=(
+827:            "╨ú╤ü╨╕╨╗╨╕╤é╤î ╨╗╨╛╨│╨╕╤Ç╨╛╨▓╨░╨╜╨╕╨╡ ╨┤╨╛ DEBUG (╤ü╤â╨╝╨╝╨╕╤Ç╤â╨╡╤é╤ü╤Å ╤ü ╨╛╨▒╤ë╨╕╨╝ ``-v``, ╨╡╤ü╨╗╨╕ ╨╛╨╜ ╨┐╨╡╤Ç╨╡╨┤ webrtc)"
+828:        ),
+829:    )
+830:
+831:    p_fb_probe = sub.add_parser(
+832:        "firebase-probe",
+833:        help="╨ƒ╨╛╨┤╨╛╨▒╤Ç╨░╤é╤î Firebase Realtime Database URL ╨╕ ╨┐╤Ç╨╛╨▓╨╡╤Ç╨╕╤é╤î ╨╖╨░╨┐╨╕╤ü╤î ╨▓ rooms/<id> (╨┤╨╕╨░╨│╨╜╨╛╤ü╤é╨╕╨║╨░ WebRTC signaling)",
+834:    )
+835:    p_fb_probe.add_argument(
+836:        "--firebase-cred",
+837:        required=True,
+838:        metavar="PATH",
+839:        dest="firebase_cred_probe",
+840:        type=_firebase_cred_existing_path,
+841:        help="serviceAccountKey.json (╤é╨╛╤é ╨╢╨╡ ╤ä╨░╨╣╨╗, ╤ç╤é╨╛ ╨┤╨╗╤Å webrtc)",
+842:    )
+843:    p_fb_probe.add_argument(
+844:        "--room",
+845:        default="pi-camera",
+846:        metavar="ID",
+847:        dest="firebase_room_probe",
+848:        help="╨ÿ╨╝╤Å ╨║╨╛╨╝╨╜╨░╤é╤ï ╨┤╨╗╤Å ╤é╨╡╤ü╤é╨╛╨▓╨╛╨╣ ╨╖╨░╨┐╨╕╤ü╨╕ (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä pi-camera)",
+849:    )
+850:    p_fb_probe.add_argument(
+851:        "--firebase-db-url",
+852:        default=None,
+853:        metavar="URL",
+854:        dest="firebase_db_url_override",
+855:        help="╨ƒ╤Ç╨╛╨▓╨╡╤Ç╨╕╤é╤î ╤é╨╛╨╗╤î╨║╨╛ ╤ì╤é╨╛╤é URL (╨▒╨╡╨╖ ╨┐╨╡╤Ç╨╡╨▒╨╛╤Ç╨░ ╤Ç╨╡╨│╨╕╨╛╨╜╨╛╨▓)",
+856:    )
+857:
+858:    try:
+859:        args = parser.parse_args()
+860:    except ArgparseCliExit as cli_ex:
+861:        c = cli_ex.code
+862:        if c is None:
+863:            return 0
+864:        if isinstance(c, int):
+865:            return c
+866:        return 1
+867:    except argparse.ArgumentError as exc:
+868:        _print_usage_chain_for_cli_error(parser, sys.argv)
+869:        print(f"{parser.prog}: error: {exc}\n", file=sys.stderr, end="")
+870:        return 2
+871:
+872:    if args.cmd == "send":
+873:        apply_stream_preset(args)
+874:
+875:    # ╨á╨░╨╜╨╜╤Å╤Å ╨┤╨╕╨░╨│╨╜╨╛╤ü╤é╨╕╨║╨░ ╨▒╨╡╨╖ ╨╗╨╕╤ê╨╜╨╕╤à ╤ü╤é╤Ç╨╛╨║ camstream INFO
+876:    if args.cmd == "firebase-probe":
+877:        from rpi_tools.firebase_probe import run_firebase_rtdb_probe
+878:
+879:        return run_firebase_rtdb_probe(
+880:            args.firebase_cred_probe,
+881:            args.firebase_room_probe,
+882:            database_url_override=args.firebase_db_url_override,
+883:        )
+884:
+885:    _vv = args.verbose + getattr(args, "webrtc_verbose", 0)
+886:    level = logging.DEBUG if _vv else getattr(logging, args.log_level)
+887:    setup_logging(level)
+888:    log.info("camstream: ╨║╨╛╨╝╨░╨╜╨┤╨░=%s, ╤â╤Ç╨╛╨▓╨╡╨╜╤î ╨╗╨╛╨│╨╛╨▓=%s", args.cmd, logging.getLevelName(level))
+889:
+890:    if args.cmd == "wifi-scan":
+891:        run_wifi_scan()
+892:        return 0
+893:
+894:    if args.cmd == "wifi-connect":
+895:        run_wifi_connect(
+896:            args.ssid,
+897:            args.password,
+898:            args.password_file,
+899:            args.ifname,
+900:            args.hidden,
+901:        )
+902:        return 0
+903:
+904:    if args.cmd == "wifi-apply":
+905:        run_wifi_apply_from_file(args.env_file)
+906:        return 0
+907:
+908:    if args.cmd == "wifi-hotspot":
+909:        ap_rc = run_wifi_hotspot(
+910:            args.ssid,
+911:            ap_password_resolve(args.password),
+912:            args.ifname,
+913:            require_ethernet_uplink=not args.force,
+914:        )
+915:        if ap_rc == 2:
+916:            _print_hotspot_blocked_hint()
+917:        return ap_rc
+918:
+919:    if args.cmd == "flash-romeo":
+920:        run_flash_romeo(args.hex)
+921:        return 0
+922:
+923:    if args.cmd == "adc-read":
+924:        run_adc_read(
+925:            args.port,
+926:            args.baud,
+927:            args.channel,
+928:            args.read_timeout,
+929:            args.read_idle,
+930:            args.open_delay,
+931:        )
+932:        return 0
+933:
+934:    if args.cmd == "vbat-read":
+935:        run_vbat_read(
+936:            args.port,
+937:            args.baud,
+938:            args.read_timeout,
+939:            args.read_idle,
+940:            args.open_delay,
+941:        )
+942:        return 0
+943:
+944:    if args.cmd == "adc-cal":
+945:        if args.mode == "vref" and args.vref_mv is not None:
+946:            if not (500 <= args.vref_mv <= 7000):
+947:                log.error("adc-cal: --set MV ╨┤╨╛╨╗╨╢╨╜╨╛ ╨▒╤ï╤é╤î ╨▓ ╨┤╨╕╨░╨┐╨░╨╖╨╛╨╜╨╡ 500..7000")
+948:                return 1
+949:        if args.mode == "vref-auto" and args.vref_mv is not None:
+950:            log.warning("adc-cal: --set ╨╕╨│╨╜╨╛╤Ç╨╕╤Ç╤â╨╡╤é╤ü╤Å ╨┤╨╗╤Å vref-auto")
+951:        run_adc_cal(
+952:            args.port,
+953:            args.baud,
+954:            args.mode,
+955:            args.vref_mv if args.mode == "vref" else None,
+956:            args.read_timeout,
+957:            args.read_idle,
+958:            args.open_delay,
+959:        )
+960:        return 0
+961:
+962:    if args.cmd in ("serial-send", "romeo"):
+963:        append_lf = not args.no_nl
+964:        run_serial_send(
+965:            args.port,
+966:            args.baud,
+967:            args.text,
+968:            append_lf,
+969:            args.read_timeout,
+970:            args.read_idle,
+971:            args.open_delay,
+972:        )
+973:        return 0
+974:
+975:    if args.cmd == "webrtc":
+976:        import asyncio
+977:
+978:        if args.webrtc_room_only:
+979:
+980:            async def _webrtc_room_only() -> None:
+981:                import time
+982:
+983:                from rpi_tools.webrtc_signaling import FirebaseSignaling, init_firebase
+984:
+985:                init_firebase(args.firebase_cred, args.firebase_db_url)
+986:                await FirebaseSignaling(args.room).reset_room_for_host_launch(
+987:                    int(time.time() * 1000)
+988:                )
+989:
+990:            try:
+991:                asyncio.run(_webrtc_room_only())
+992:            except Exception:
+993:                log.exception(
+994:                    "webrtc --room-only: ╨╖╨░╨┐╨╕╤ü╤î ╨║╨╛╨╝╨╜╨░╤é╤ï ╨╜╨╡ ╤â╨┤╨░╨╗╨░╤ü╤î "
+995:                    "(╤ü╨╝. ╨▓╤ï╤ê╨╡; ╤ü╤Ç╨░╨▓╨╜╨╕╤é╨╡ URL ╤ü ╤Ç╨╡╨╖╤â╨╗╤î╤é╨░╤é╨╛╨╝ firebase-probe)"
+996:                )
+997:                return 1
+998:            log.info(
+999:                "webrtc --room-only: ╨╛╨║. ╨Æ Firebase Console ╨╛╤é╨║╤Ç╨╛╨╣╤é╨╡ Realtime Database ╨╕ ╤â╨╖╨╡╨╗ rooms/%s",
+1000:                args.room,
+1001:            )
+1002:            return 0
+1003:
+1004:        try:
+1005:            from rpi_tools.camera_stream import _CameraControlState, _make_camera_control_handler
+1006:            from rpi_tools.webrtc_host import run_webrtc_host
+1007:            from rpi_tools.romeo_usb import romeo_exchange
+1008:        except ModuleNotFoundError as e:
+1009:            mod = getattr(e, "name", "") or ""
+1010:            pip_hint = "`pip install -r requirements.txt` ΓÇö ╨┐╨╛╨╗╨╜╤ï╨╣ ╤ü╨┐╨╕╤ü╨╛╨║ ╨┤╨╗╤Å Pi/WebRTC/Firebase."
+1011:            if mod == "firebase_admin":
+1012:                pip_hint = (
+1013:                    "`pip install firebase-admin` (╨┐╨░╨║╨╡╤é ╨╕╨╝╨┐╨╛╤Ç╤é╨╕╤Ç╤â╨╡╤é╤ü╤Å ╨║╨░╨║ firebase_admin) "
+1014:                    "╨╕╨╗╨╕ `pip install -r requirements.txt`."
+1015:                )
+1016:            elif mod in ("aiortc", "av"):
+1017:                pip_hint = "`pip install aiortc av` ╨╕╨╗╨╕ `pip install -r requirements.txt`."
+1018:            log.error(
+1019:                "╨ö╨╗╤Å ╤Ç╨╡╨╢╨╕╨╝╨░ ┬½webrtc┬╗ ╨╜╨╡ ╤â╤ü╤é╨░╨╜╨╛╨▓╨╗╨╡╨╜ ╨╝╨╛╨┤╤â╨╗╤î %r (%s). "
+1020:                "╨Æ╤ï╨▒╨╡╤Ç╨╕╤é╨╡ ╨╕╨╜╤é╨╡╤Ç╨┐╤Ç╨╡╤é╨░╤é╨╛╤Ç ╤é╨╛╨│╨╛ venv, ╨│╨┤╨╡ ╤ü╤é╨╛╤Å╤é ╨╖╨░╨▓╨╕╤ü╨╕╨╝╨╛╤ü╤é╨╕ (╤ç╨░╤ü╤é╨╛ ./.venv/bin/python), ╨╖╨░╤é╨╡╨╝: %s",
+1021:                mod,
+1022:                e,
+1023:                pip_hint,
+1024:            )
+1025:            print(
+1026:                "camstream: ╨╜╨╡╤é ╨╝╨╛╨┤╤â╨╗╤Å ╨┤╨╗╤Å webrtc. ╨Æ Cursor: ╨▓╤ï╨▒╨╡╤Ç╨╕╤é╨╡ ╨╕╨╜╤é╨╡╤Ç╨┐╤Ç╨╡╤é╨░╤é╨╛╤Ç .venv ╨┐╤Ç╨╛╨╡╨║╤é╨░ "
+1027:                "╨╕ ╨▓╤ï╨┐╨╛╨╗╨╜╨╕╤é╨╡: pip install -r requirements.txt",
+1028:                file=sys.stderr,
+1029:            )
+1030:            return 1
+1031:
+1032:        camera_state = _CameraControlState()
+1033:        camera_handler = _make_camera_control_handler(camera_state)
+1034:
+1035:        romeo_usb = args.romeo_usb or ROMEO_USB_PORT
+1036:        romeo_baud = args.romeo_baud
+1037:        tank_speed = args.romeo_tank_speed
+1038:        turret_step = args.romeo_turret_step
+1039:
+1040:        # Data Channel ╨┐╤Ç╨╕╨╜╨╕╨╝╨░╨╡╤é ╤é╨╛╤é ╨╢╨╡ JSON, ╤ç╤é╨╛ Romeo TCP-╤ü╨╡╤Ç╨▓╨╡╤Ç; ╨┐╤Ç╨╕╨╝╨╡╤Ç ╨┤╨╗╤Å ╨▒╤Ç╨░╤â╨╖╨╡╤Ç╨░:
+1041:        # examples/webrtc_browser_control_keys.js (WASD drive, ╤ü╤é╤Ç╨╡╨╗╨║╨╕ ΓåÆ turret_smooth / turret_stop).
+1042:        def _webrtc_command_handler(obj: dict) -> dict:
+1043:            cam_result = camera_handler(obj)
+1044:            if cam_result is not None:
+1045:                return cam_result
+1046:            from rpi_tools.romeo_control_server import _json_to_romeo_lines
+1047:            try:
+1048:                lines = _json_to_romeo_lines(obj, tank_speed, turret_step)
+1049:            except ValueError as e:
+1050:                return {"ok": False, "error": str(e)}
+1051:            parts: list[str] = []
+1052:            for cmd_line in lines:
+1053:                try:
+1054:                    chunk = romeo_exchange(
+1055:                        romeo_usb, romeo_baud, cmd_line,
+1056:                        append_lf=True, read_timeout=0.45, read_idle=0.03,
+1057:                    )
+1058:                    if chunk:
+1059:                        parts.append(chunk.decode("utf-8", errors="replace"))
+1060:                except (OSError, RuntimeError) as e:
+1061:                    return {"ok": False, "error": str(e)}
+1062:            return {"ok": True, "reply": "".join(parts)}
+1063:
+1064:        camera_extra = camera_state.build_rpicam_args()
+1065:
+1066:        ice_vps_only = bool(getattr(args, "webrtc_ice_vps_only", False))
+1067:        ice_url = (args.ice_config_url or "").strip() or None
+1068:        ice_token = (args.ice_config_token or "").strip() or None
+1069:        if ice_vps_only:
+1070:            if not ice_url or not ice_token:
+1071:                print(
+1072:                    "webrtc --ice-vps-only: ╨╜╤â╨╢╨╜╤ï ICE_CONFIG_URL ╨╕ ICE_CONFIG_TOKEN "
+1073:                    "(config/webrtc.ice.local.env ╨╕╨╗╨╕ --ice-config-url / --ice-config-token).",
+1074:                    file=sys.stderr,
+1075:                )
+1076:                return 2
+1077:
+1078:        try:
+1079:            asyncio.run(run_webrtc_host(
+1080:                firebase_cred=args.firebase_cred,
+1081:                firebase_db_url=args.firebase_db_url,
+1082:                room_id=args.room,
+1083:                width=args.width,
+1084:                height=args.height,
+1085:                fps=args.fps,
+1086:                bitrate=args.video_bitrate,
+1087:                intra=args.video_intra,
+1088:                profile=args.video_profile,
+1089:                camera_extra_args=camera_extra,
+1090:                command_handler=_webrtc_command_handler,
+1091:                ice_config_url=ice_url,
+1092:                ice_config_token=ice_token,
+1093:                ice_merge_public_stun=not (
+1094:                    args.webrtc_no_ice_merge_stun or ice_vps_only
+1095:                ),
+1096:                ice_fetch_timeout_sec=float(args.ice_fetch_timeout),
+1097:                ice_config_required=ice_vps_only,
+1098:                ice_turn_only=ice_vps_only,
+1099:            ))
+1100:        except KeyboardInterrupt:
+1101:            log.info("webrtc: ╨╛╤ü╤é╨░╨╜╨╛╨▓╨║╨░ ╨┐╨╛ Ctrl+C")
+1102:        return 0
+1103:
+1104:    if args.cmd == "send":
+1105:        if args.ap_ssid:
+1106:            ap_rc = run_wifi_hotspot(
+1107:                args.ap_ssid,
+1108:                ap_password_resolve(args.ap_password),
+1109:                args.ap_ifname,
+1110:                require_ethernet_uplink=not args.ap_force,
+1111:            )
+1112:            if ap_rc == 2:
+1113:                _print_hotspot_blocked_hint()
+1114:            if ap_rc != 0:
+1115:                return ap_rc
+1116:        if args.listen and args.host.strip().lower() not in ("auto", "discover"):
+1117:            print(
+1118:                "╨ƒ╤Ç╨╕ --listen ╨┐╨░╤Ç╨░╨╝╨╡╤é╤Ç --host ╨╜╨╡ ╨╕╤ü╨┐╨╛╨╗╤î╨╖╤â╨╡╤é╤ü╤Å (╨║╨╗╨╕╨╡╨╜╤é╤ï ╨┐╨╛╨┤╨║╨╗╤Ä╤ç╨░╤Ä╤é╤ü╤Å ╨║ ╤ì╤é╨╛╨╝╤â Pi).",
+1119:                file=sys.stderr,
+1120:            )
+1121:        if args.listen:
+1122:            listen_disc = None if args.no_discovery or args.discover_port == 0 else args.discover_port
+1123:        else:
+1124:            listen_disc = None
+1125:        try:
+1126:            run_send(
+1127:                args.host,
+1128:                args.port,
+1129:                args.camera,
+1130:                args.width,
+1131:                args.height,
+1132:                args.fps,
+1133:                args.jpeg_quality,
+1134:                args.discover_port,
+1135:                args.discover_token,
+1136:                args.discover_timeout,
+1137:                args.discover_index,
+1138:                args.discover_loop,
+1139:                args.discover_loop_interval,
+1140:                args.listen,
+1141:                listen_disc,
+1142:                None,
+1143:                args.timestamp,
+1144:                args.camera_device,
+1145:                args.capture_backend,
+1146:                not args.no_set_fps,
+1147:                args.capture,
+1148:                video_mode=args.video_mode,
+1149:                video_bitrate=args.video_bitrate,
+1150:                video_intra=args.video_intra,
+1151:                video_profile=args.video_profile,
+1152:                rtsp_path=args.rtsp_path,
+1153:                video_level=args.video_level,
+1154:                romeo_control_port=args.romeo_control_port,
+1155:                romeo_usb_port=args.romeo_usb,
+1156:                romeo_baud=args.romeo_baud,
+1157:                romeo_open_delay=args.romeo_open_delay,
+1158:                romeo_tank_speed=args.romeo_tank_speed,
+1159:                romeo_turret_step=args.romeo_turret_step,
+1160:                romeo_led_interval_sec=args.romeo_led_interval,
+1161:                romeo_adc_interval_sec=args.romeo_adc_interval,
+1162:                picamera_use_jpeg_encoder=not args.legacy_picamera_jpeg_loop,
+1163:                jpeg_chroma_subsampling=args.jpeg_chroma,
+1164:                jpeg_encoder_threads=args.jpeg_threads,
+1165:                jpeg_fast_dct=not args.no_jpeg_fast_dct,
+1166:                jpeg_tcp_queue_depth=args.jpeg_tcp_queue,
+1167:            )
+1168:        except TcpBindError:
+1169:            return 3
+1170:        return 0
+1171:
+1172:    return 0
+1173:
+1174:
+1175:if __name__ == "__main__":
+1176:    raise SystemExit(main())

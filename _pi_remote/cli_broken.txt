@@ -1,0 +1,28 @@
+﻿968:
+969:            async def _webrtc_room_only() -> None:
+970:                import time
+971:
+972:                from rpi_tools.webrtc_vps_signaling import VpsSignaling
+973:
+974:                sig = VpsSignaling(
+975:                    args.room,
+976:                    api_base=(getattr(args, "signal_url", None) or os.environ.get("WEBRTC_SIGNAL_URL", "")).strip(),
+977:                    ice_token=(getattr(args, "ice_config_token", None) or os.environ.get("ICE_CONFIG_TOKEN")),
+978:                )
+979:                await sig.reset_room_for_host_launch
+980:                    int(time.time() * 1000)
+981:                )
+982:
+983:            try:
+984:                asyncio.run(_webrtc_room_only())
+985:            except Exception:
+986:                log.exception(
+987:                    "webrtc --room-only: ╨╖╨░╨┐╨╕╤ü╤î ╨║╨╛╨╝╨╜╨░╤é╤ï ╨╜╨╡ ╤â╨┤╨░╨╗╨░╤ü╤î "
+988:                    "(╤ü╨╝. ╨▓╤ï╤ê╨╡; ╤ü╤Ç╨░╨▓╨╜╨╕╤é╨╡ URL ╤ü ╤Ç╨╡╨╖╤â╨╗╤î╤é╨░╤é╨╛╨╝ firebase-probe)"
+989:                )
+990:                return 1
+991:            log.info(
+992:                "webrtc --room-only: ╨╛╨║. VPS signaling, ╨║╨╛╨╝╨╜╨░╤é╨░ %s (╨╛╤é╨║╤Ç╨╛╨╣╤é╨╡ http://116.203.148.254/cam)",
+993:                args.room,
+994:            )
+995:            return 0

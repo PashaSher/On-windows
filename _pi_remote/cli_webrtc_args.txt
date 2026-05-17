@@ -1,0 +1,141 @@
+﻿680:        type=float,
+681:        default=0.25,
+682:        metavar="SEC",
+683:        help="╨ó╨╕╤ê╨╕╨╜╨░ ╨╜╨░ ╨╗╨╕╨╜╨╕╨╕ ╨┐╨╛╤ü╨╗╨╡ ╨┐╨╛╤ü╨╗╨╡╨┤╨╜╨╡╨│╨╛ ╨▒╨░╨╣╤é╨░ ΓÇö ╨╛╤é╨▓╨╡╤é ╤ü╨╛╨▒╤Ç╨░╨╜",
+684:    )
+685:    p_cal.add_argument(
+686:        "--open-delay",
+687:        type=float,
+688:        default=0.0,
+689:        metavar="SEC",
+690:        help="╨ƒ╨░╤â╨╖╨░ ╨┐╨╛╤ü╨╗╨╡ ╨╛╤é╨║╤Ç╤ï╤é╨╕╤Å ╨┐╨╛╤Ç╤é╨░ ╨┤╨╛ ╨┐╨╡╤Ç╨▓╨╛╨╣ ╨║╨╛╨╝╨░╨╜╨┤╤ï",
+691:    )
+692:
+693:    p_webrtc = sub.add_parser(
+694:        "webrtc",
+695:        help="WebRTC Host: H.264 ╨▓╨╕╨┤╨╡╨╛ + Data Channel ╤â╨┐╤Ç╨░╨▓╨╗╨╡╨╜╨╕╨╡ ╤ç╨╡╤Ç╨╡╨╖ Firebase signaling",
+696:    )
+697:    p_webrtc.add_argument(
+698:        "--firebase-cred",
+699:        required=True,
+700:        metavar="PATH",
+701:        type=_firebase_cred_existing_path,
+702:        help="╨ƒ╤â╤é╤î ╨║ serviceAccountKey.json ╨╛╤é Firebase",
+703:    )
+704:    p_webrtc.add_argument(
+705:        "--firebase-db-url",
+706:        required=True,
+707:        metavar="URL",
+708:        type=_firebase_rtdb_url,
+709:        help=(
+710:            "URL Firebase Realtime Database, "
+711:            "╨╜╨░╨┐╤Ç╨╕╨╝╨╡╤Ç https://<id>-default-rtdb.firebaseio.com (╨┐╨╛╨┤╨╛╨▒╤Ç╨░╤é╤î: ╨║╨╛╨╝╨░╨╜╨┤╨░ firebase-probe)"
+712:        ),
+713:    )
+714:    p_webrtc.add_argument(
+715:        "--room",
+716:        default="pi-camera",
+717:        metavar="ID",
+718:        type=_webrtc_room_non_empty,
+719:        help=(
+720:            "╨ÿ╨╝╤Å ╨║╨╛╨╝╨╜╨░╤é╤ï ╨▓ RTDB (/rooms/<id>/). ╨ó╨╛ ╨╢╨╡ ╤ü╤é╤Ç╨╛╨║╨╛╨╣ ╨▓ HTML ╨╛╨┐╨╡╤Ç╨░╤é╨╛╤Ç╨░; "
+721:            "╨╡╤ü╨╗╨╕ ╨▒╤Ç╨░╤â╨╖╨╡╤Ç ╨┐╨╕╤ê╨╡╤é ╨▓ pi-cam-2 ΓÇö ╨╖╨░╨┐╤â╤ü╨║: --room pi-cam-2"
+722:        ),
+723:    )
+724:    p_webrtc.add_argument("--width", type=int, default=1280, help="╨¿╨╕╤Ç╨╕╨╜╨░ ╨║╨░╨┤╤Ç╨░ (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä 1280)")
+725:    p_webrtc.add_argument("--height", type=int, default=720, help="╨Æ╤ï╤ü╨╛╤é╨░ ╨║╨░╨┤╤Ç╨░ (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä 720)")
+726:    p_webrtc.add_argument("--fps", type=float, default=30.0, help="FPS (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä 30)")
+727:    p_webrtc.add_argument(
+728:        "--video-bitrate",
+729:        type=int,
+730:        default=4_000_000,
+731:        metavar="BPS",
+732:        help="╨æ╨╕╤é╤Ç╨╡╨╣╤é H.264 ╨▓ ╨▒╨╕╤é/╤ü (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä 4000000 = 4 ╨£╨▒╨╕╤é/╤ü)",
+733:    )
+734:    p_webrtc.add_argument(
+735:        "--video-intra",
+736:        type=int,
+737:        default=30,
+738:        metavar="N",
+739:        help="╨ÿ╨╜╤é╨╡╤Ç╨▓╨░╨╗ I-frame / IDR (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä 30)",
+740:    )
+741:    p_webrtc.add_argument(
+742:        "--video-profile",
+743:        choices=["baseline", "main", "high"],
+744:        default="baseline",
+745:        help=(
+746:            "H.264 ╨┐╤Ç╨╛╤ä╨╕╨╗╤î ╨┤╨╗╤Å rpicam ╨┐╨╡╤Ç╨╡╨┤ RTP (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä baseline ΓÇö ╨╗╤â╤ç╤ê╨╡ ╤ü ╨┤╨╡╨║╨╛╨┤╨╡╤Ç╨░╨╝╨╕ ╨▒╤Ç╨░╤â╨╖╨╡╤Ç╨░)"
+747:        ),
+748:    )
+749:    p_webrtc.add_argument(
+750:        "--romeo-usb",
+751:        default=None,
+752:        metavar="DEV",
+753:        help=f"USB CDC Romeo (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä {ROMEO_USB_PORT})",
+754:    )
+755:    p_webrtc.add_argument("--romeo-baud", type=int, default=115200, help="╨í╨║╨╛╤Ç╨╛╤ü╤é╤î UART Romeo")
+756:    p_webrtc.add_argument(
+757:        "--romeo-tank-speed",
+758:        type=int,
+759:        default=ROMEO_TANK_SPEED_DEFAULT,
+760:        metavar="N",
+761:        help="╨æ╨░╨╖╨╛╨▓╤ï╨╣ ╨╝╨╛╨┤╤â╨╗╤î ╨┤╨╗╤Å JSON drive left/right",
+762:    )
+763:    p_webrtc.add_argument(
+764:        "--romeo-turret-step",
+765:        type=int,
+766:        default=None,
+767:        metavar="DEG",
+768:        help="╨¿╨░╨│ ╨▒╨░╤ê╨╜╨╕ ╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä ╨┤╨╗╤Å action=turret",
+769:    )
+770:    p_webrtc.add_argument(
+771:        "--room-only",
+772:        action="store_true",
+773:        dest="webrtc_room_only",
+774:        help=(
+775:            "╨ó╨╛╨╗╤î╨║╨╛ ╨╖╨░╨┐╨╕╤ü╨░╤é╤î ╨▓ RTDB /rooms/<--room>/status=waiting ╨╕ ╨▓╤ï╨╣╤é╨╕ "
+776:            "(╨▒╨╡╨╖ ╨║╨░╨╝╨╡╤Ç╤ï ╨╕ aiortc; ╨┐╤Ç╨╛╨▓╨╡╤Ç╨╕╤é╤î cred ╨╕ --firebase-db-url ╨╜╨░ Pi)"
+777:        ),
+778:    )
+779:    p_webrtc.add_argument(
+780:        "--ice-config-url",
+781:        default=os.environ.get("ICE_CONFIG_URL") or "",
+782:        metavar="URL",
+783:        help=(
+784:            "HTTP(S) GET JSON ╤ü ╨┐╨╛╨╗╨╡╨╝ iceServers (╨║╨░╨║ GET /api/ice ╨╜╨░ VPS). "
+785:            "╨ƒ╤â╤ü╤é╨╛ ΓÇö ╤é╨╛╨╗╤î╨║╨╛ ╨▓╤ü╤é╤Ç╨╛╨╡╨╜╨╜╤ï╨╣ Google STUN. ╨ƒ╨╡╤Ç╨╡╨╝╨╡╨╜╨╜╨░╤Å ╨╛╨║╤Ç╤â╨╢╨╡╨╜╨╕╤Å: ICE_CONFIG_URL."
+786:        ),
+787:    )
+788:    p_webrtc.add_argument(
+789:        "--ice-config-token",
+790:        default=os.environ.get("ICE_CONFIG_TOKEN") or "",
+791:        metavar="SECRET",
+792:        help=(
+793:            "╨ó╨╛╨║╨╡╨╜ ╨┤╨╗╤Å ICE API: ╨╖╨░╨│╨╛╨╗╨╛╨▓╨╛╨║ Authorization: Bearer ΓÇª ╨╕ ╨┤╤â╨▒╨╗╨╕╤Ç╨╛╨▓╨░╨╜╨╕╨╡ ╨▓ ?token= "
+794:            "╨╡╤ü╨╗╨╕ ╨▓ URL ╨╡╤ë╤æ ╨╜╨╡╤é token=. ╨ƒ╨╡╤Ç╨╡╨╝╨╡╨╜╨╜╨░╤Å: ICE_CONFIG_TOKEN (chmod 600 ╨╜╨░ Pi)."
+795:        ),
+796:    )
+797:    p_webrtc.add_argument(
+798:        "--no-ice-merge-stun",
+799:        action="store_true",
+800:        dest="webrtc_no_ice_merge_stun",
+801:        help="╨¥╨╡ ╨┤╨╛╨▒╨░╨▓╨╗╤Å╤é╤î ╨┐╤â╨▒╨╗╨╕╤ç╨╜╤ï╨╣ STUN ╨┐╨╛╤ü╨╗╨╡ ╤ü╨┐╨╕╤ü╨║╨░ ╤ü ICE API (╤é╨╛╨╗╤î╨║╨╛ ╤é╨╛, ╤ç╤é╨╛ ╨▓╨╡╤Ç╨╜╤â╨╗ ╤ü╨╡╤Ç╨▓╨╡╤Ç).",
+802:    )
+803:    p_webrtc.add_argument(
+804:        "--ice-vps-only",
+805:        action="store_true",
+806:        dest="webrtc_ice_vps_only",
+807:        help=(
+808:            "╨á╨╡╨╢╨╕╨╝ ╨╛╤é╨╗╨░╨┤╨║╨╕ ┬½╤é╨╛╨╗╤î╨║╨╛ ╤ç╨╡╤Ç╨╡╨╖ Hetzner┬╗: ICE API ╨╛╨▒╤Å╨╖╨░╤é╨╡╨╗╨╡╨╜, ╨▒╨╡╨╖ fallback ╨╜╨░ Google STUN, "
+809:            "╨╕╨╖ ╨╛╤é╨▓╨╡╤é╨░ API ╤é╨╛╨╗╤î╨║╨╛ turn: (relay). ╨¡╨║╨▓╨╕╨▓╨░╨╗╨╡╨╜╤é --no-ice-merge-stun + ╨╢╤æ╤ü╤é╨║╨░╤Å ╨┐╤Ç╨╛╨▓╨╡╤Ç╨║╨░ API."
+810:        ),
+811:    )
+812:    p_webrtc.add_argument(
+813:        "--ice-fetch-timeout",
+814:        type=float,
+815:        default=8.0,
+816:        metavar="SEC",
+817:        help="╨ó╨░╨╣╨╝╨░╤â╤é HTTP ╨╖╨░╨┐╤Ç╨╛╤ü╨░ ╨╖╨░ ICE JSON (╨┐╨╛ ╤â╨╝╨╛╨╗╤ç╨░╨╜╨╕╤Ä 8 ╤ü).",
+818:    )
+819:    # ╨ô╨╗╨╛╨▒╨░╨╗╤î╨╜╤ï╨╣ -v ╨╖╨░╨┤╨░╤æ╤é╤ü╤Å *╨┤╨╛* ╨┐╨╛╨┤╨║╨╛╨╝╨░╨╜╨┤╤ï; ╨┤╤â╨▒╨╗╤î ╨╖╨┤╨╡╤ü╤î ΓÇö ╤ç╤é╨╛╨▒╤ï ╤Ç╨░╨▒╨╛╤é╨░╨╗╨╛ ``webrtc ΓÇª -v`` (╤é╨╕╨┐╨╕╤ç╨╜╨╛ ╨▓ Run/Debug).
+820:    p_webrtc.add_argument(

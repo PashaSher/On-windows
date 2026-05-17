@@ -1,0 +1,33 @@
+Pi: WebRTC signaling на VPS (без Firebase)
+=========================================
+
+Браузер: http://116.203.148.254/cam
+
+Pi должен использовать тот же API, что раньше Firebase RTDB.
+
+Python (модуль в репозитории):
+  cloud/pi_vps_signaling.py
+
+Переменные на Pi (как для ICE):
+  WEBRTC_SIGNAL_URL=http://116.203.148.254/api/signal
+  WEBRTC_ROOM=pi-camera
+  ICE_CONFIG_TOKEN=...  (тот же, что на VPS /etc/default/ice-config-server)
+
+Минимальный цикл callee (псевдокод):
+
+  sig = VpsSignalingClient(SIGNAL_URL, ROOM, ice_token=TOKEN)
+  sig.set_host(need_offer=True, host_launch_id=..., status="waiting")
+  offer = sig.wait_offer(timeout=120)
+  # create PC, set_remote_description(offer), create_answer, set_local_description
+  sig.put_answer({"type": "answer", "sdp": local_sdp})
+  # trickle: sig.post_callee_candidate(...)  и читать callerCandidates из wait_events / poll_caller_candidates
+
+В stream_camera.py замените Firebase на VpsSignalingClient (те же поля:
+needOffer, hostLaunchId, offer, answer, callerCandidates, calleeCandidates).
+
+API (для справки):
+  PUT  /api/signal/rooms/pi-camera/host
+  GET  /api/signal/rooms/pi-camera/events?since=0&timeout=25
+  PUT  /api/signal/rooms/pi-camera/answer
+  POST /api/signal/rooms/pi-camera/callee-candidates
+  (оператор пишет offer и caller-candidates)
