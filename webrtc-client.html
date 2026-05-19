@@ -351,7 +351,6 @@
         } from "./examples/webrtc_browser_control_keys.js";
         import { mountVirtualJoystick } from "./examples/webrtc_touch_joysticks.js";
         import { updateHostTelemetryUi } from "./examples/webrtc_host_telemetry.js";
-
         async function loadOperatorBootstrap() {
             const qs = new URLSearchParams(window.location.search);
             const shareMode =
@@ -975,7 +974,6 @@
             };
             ch.onclose = () => log(`Control channel closed (${ch.label})`, "warn");
             ch.onerror = (e) => log("Control channel error: " + (e && e.message ? e.message : String(e)), "error");
-            ch.onmessage = (e) => log(`Pi: ${e.data}`, "info");
         }
 
         function teardownSignalingListeners() {
