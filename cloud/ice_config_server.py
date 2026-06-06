@@ -26,7 +26,7 @@ import json
 import mimetypes
 import os
 import sys
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -294,7 +294,7 @@ def main() -> None:
     ap.add_argument("--host", default="127.0.0.1", help="bind address (0.0.0.0 for LAN/VPS)")
     ap.add_argument("--port", type=int, default=8788)
     args = ap.parse_args()
-    httpd = HTTPServer((args.host, args.port), Handler)
+    httpd = ThreadingHTTPServer((args.host, args.port), Handler)
     print(
         f"ICE config server http://{args.host}:{args.port}/api/ice",
         file=sys.stderr,
