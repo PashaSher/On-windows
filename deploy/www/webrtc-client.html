@@ -217,6 +217,56 @@
             color: #fff;
             font-size: 0.85rem;
         }
+        .romeo-msg-row {
+            display: flex;
+            gap: 8px;
+            max-width: 520px;
+            margin: 10px auto 0;
+            align-items: center;
+        }
+        .romeo-msg-row input {
+            flex: 1;
+            min-width: 0;
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid #0f3460;
+            background: #0a1628;
+            color: #e0e0e0;
+            font-size: 0.95rem;
+        }
+        .romeo-msg-row input::placeholder {
+            color: #78909c;
+        }
+        .romeo-msg-row input:disabled {
+            opacity: 0.55;
+        }
+        .btn-msg {
+            flex-shrink: 0;
+            padding: 10px 14px;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            touch-action: manipulation;
+        }
+        .btn-msg-send {
+            background: #1565c0;
+            color: #fff;
+        }
+        .btn-msg-send:hover { background: #1976d2; }
+        .btn-msg-clear {
+            background: #37474f;
+            color: #cfd8dc;
+        }
+        .btn-msg-clear:hover { background: #455a64; }
+        .romeo-msg-hint {
+            max-width: 520px;
+            margin: 6px auto 0;
+            font-size: 0.72rem;
+            color: #78909c;
+            text-align: center;
+        }
         @media (min-width: 901px) {
             .joystick { width: 130px; height: 130px; }
         }
@@ -262,6 +312,12 @@
                         <div id="joyTurret" aria-label="Джойстик камеры"></div>
                     </div>
                 </div>
+                <div class="romeo-msg-row">
+                    <input type="text" id="romeoMsgInput" placeholder="" maxlength="120" autocomplete="off">
+                    <button type="button" class="btn-msg btn-msg-clear" id="btnRomeoMsgClr" title="Очистить дисплей Romeo">CLR</button>
+                    <button type="button" class="btn-msg btn-msg-send" id="btnRomeoMsgSend">Отправить</button>
+                </div>
+                <p class="romeo-msg-hint">Data Channel: {"romeo":"MSG текст"} → /dev/ttyACM0</p>
             </div>
         </div>
     </div>
@@ -892,9 +948,72 @@
                 if (!opts.quiet) {
                     log(`Sent: ${cmd}`);
                 }
-            } else if (!opts.quiet) {
+                return true;
+            }
+            if (!opts.quiet) {
                 log("Control channel not open (ждите onopen или проверьте Pi сторону)", "error");
             }
+            return false;
+        }
+
+        function romeoRawJson(cmd) {
+            return JSON.stringify({ romeo: cmd });
+        }
+
+        let lastRomeoMsgDisplayed = "";
+
+        function setRomeoMsgDisplayed(text) {
+            lastRomeoMsgDisplayed = String(text || "");
+            const input = document.getElementById("romeoMsgInput");
+            if (!input) {
+                return;
+            }
+            input.value = lastRomeoMsgDisplayed;
+            const open = Boolean(dataChannel && dataChannel.readyState === "open");
+            input.placeholder = lastRomeoMsgDisplayed
+                ? ""
+                : open
+                  ? "Введите сообщение"
+                  : "Подключитесь (Connect) для отправки";
+        }
+
+        function sendRomeoMsg(text) {
+            const input = document.getElementById("romeoMsgInput");
+            const t = String(text ?? input?.value ?? "").trim();
+            if (!t) {
+                log("Введите текст сообщения", "warn");
+                return false;
+            }
+            if (!sendDc(romeoRawJson("MSG " + t))) {
+                return false;
+            }
+            setRomeoMsgDisplayed(t);
+            return true;
+        }
+
+        function sendRomeoMsgClr() {
+            if (!sendDc(romeoRawJson("MSGCLR"))) {
+                return false;
+            }
+            setRomeoMsgDisplayed("");
+            return true;
+        }
+
+        function updateRomeoMsgUi() {
+            const open = Boolean(dataChannel && dataChannel.readyState === "open");
+            const btnSend = document.getElementById("btnRomeoMsgSend");
+            const btnClr = document.getElementById("btnRomeoMsgClr");
+            const input = document.getElementById("romeoMsgInput");
+            if (input) {
+                input.disabled = !open;
+            }
+            if (btnSend) {
+                btnSend.disabled = !open;
+            }
+            if (btnClr) {
+                btnClr.disabled = !open;
+            }
+            setRomeoMsgDisplayed(lastRomeoMsgDisplayed);
         }
 
         function startWebrtcStats() {
@@ -971,9 +1090,17 @@
             dataChannel = ch;
             ch.onopen = () => {
                 log(`Control channel open (label=${ch.label})`, "success");
+                updateRomeoMsgUi();
             };
-            ch.onclose = () => log(`Control channel closed (${ch.label})`, "warn");
-            ch.onerror = (e) => log("Control channel error: " + (e && e.message ? e.message : String(e)), "error");
+            ch.onclose = () => {
+                log(`Control channel closed (${ch.label})`, "warn");
+                updateRomeoMsgUi();
+            };
+            ch.onerror = (e) => {
+                log("Control channel error: " + (e && e.message ? e.message : String(e)), "error");
+                updateRomeoMsgUi();
+            };
+            updateRomeoMsgUi();
         }
 
         function teardownSignalingListeners() {
@@ -1140,6 +1267,9 @@
         window.startConnection = startConnection;
         window.hangup = hangup;
         window.sendCmd = sendCmd;
+        window.sendDc = sendDc;
+        window.sendRomeoMsg = sendRomeoMsg;
+        window.sendRomeoMsgClr = sendRomeoMsgClr;
         window.saveWebrtcSettings = saveWebrtcSettings;
 
         // ============================================================
@@ -1457,6 +1587,24 @@
         });
 
         document.getElementById("btnHome")?.addEventListener("click", () => sendDc(romeoHomeJson()));
+
+        const romeoMsgInput = document.getElementById("romeoMsgInput");
+        document.getElementById("btnRomeoMsgSend")?.addEventListener("click", () => {
+            sendRomeoMsg();
+        });
+        document.getElementById("btnRomeoMsgClr")?.addEventListener("click", () => {
+            sendRomeoMsgClr();
+        });
+        romeoMsgInput?.addEventListener("keydown", (ev) => {
+            if (ev.key === "Enter") {
+                ev.preventDefault();
+                sendRomeoMsg();
+            }
+        });
+        romeoMsgInput?.addEventListener("focus", () => {
+            romeoMsgInput.select();
+        });
+        updateRomeoMsgUi();
 
         ensureHostLaunchWatch();
         if (typeof window.__webrtcMarkReady === "function") {
