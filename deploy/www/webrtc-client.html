@@ -1189,13 +1189,9 @@
             const { iceUrl, token: iceTok } = getIceConfigFromUi();
             offerWrittenForSession = false;
             try {
-                await signalClearRoom(signalApiBase, roomPath, iceTok);
+                await signalClearCallerSide(signalApiBase, roomPath, iceTok);
             } catch (e) {
-                try {
-                    await signalClearCallerSide(signalApiBase, roomPath, iceTok);
-                } catch (e2) {
-                    log("signal clear: " + (e2 && e2.message ? e2.message : String(e2)), "warn");
-                }
+                log("signal clear caller: " + (e && e.message ? e.message : String(e)), "warn");
             }
 
             let iceProbe;
@@ -1421,7 +1417,7 @@
             const { token: iceTok } = getIceConfigFromUi();
             offerWrittenForSession = false;
             try {
-                await signalClearRoom(signalApiBase, rp, iceTok);
+                await signalClearCallerSide(signalApiBase, rp, iceTok);
             } catch (_) {}
 
             setStatus("Disconnected", "");
