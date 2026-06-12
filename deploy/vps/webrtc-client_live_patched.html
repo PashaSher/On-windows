@@ -283,6 +283,7 @@
             <span class="telemetry-item" id="telemetryWifi">Wi‑Fi: —</span>
             <span class="telemetry-age" id="telemetryAge"></span>
         </div>
+        <span class="telemetry-item" id="videoFps" title="Входящий FPS (WebRTC stats)">FPS: —</span>
         <span class="telemetry-item" id="piAudioStatus" title="Звук с микрофона Pi">🔊 —</span>
         <span id="status">Disconnected</span>
     </header>
@@ -812,19 +813,22 @@
                 return;
             }
             let applied = false;
+            const hasPiAudio = pc.getReceivers().some((r) => r.track && r.track.kind === "audio");
+            // С аудио через TURN — небольшой jitter-буфер стабилизирует FPS (0 ms даёт рваное видео).
+            const jitterMs = hasPiAudio ? 100 : 0;
             for (const r of pc.getReceivers()) {
                 if (!r.track || r.track.kind !== "video") {
                     continue;
                 }
                 try {
                     if ("playoutDelayHint" in r) {
-                        r.playoutDelayHint = 0;
+                        r.playoutDelayHint = hasPiAudio ? 0.05 : 0;
                         applied = true;
                     }
                 } catch (_) {}
                 try {
                     if ("jitterBufferTarget" in r) {
-                        r.jitterBufferTarget = 0;
+                        r.jitterBufferTarget = jitterMs;
                         applied = true;
                     }
                 } catch (_) {}
@@ -832,7 +836,9 @@
             if (applied && !lowLatencyHintLogged) {
                 lowLatencyHintLogged = true;
                 log(
-                    "Браузер: playoutDelayHint/jitterBufferTarget → 0 (меньше джиттер-буфер, цель — ближе к «живому» видео). ~1 с обычно даёт энкодер/буферы на Pi.",
+                    hasPiAudio
+                        ? "Браузер: видео+аудио через TURN — jitterBuffer=100ms (стабильнее FPS, +~0.1с задержки)"
+                        : "Браузер: playoutDelayHint/jitterBufferTarget → 0 (минимальная задержка)",
                     "info",
                 );
             }
@@ -843,6 +849,7 @@
                 clearInterval(statsTimer);
                 statsTimer = null;
             }
+            updateVideoFpsUi(null);
         }
 
         function stopIceDiagTimer() {
@@ -887,13 +894,17 @@
             iceReconnectScheduled = false;
         }
 
-        function scheduleIceReconnect(reason, delayMs = 2500) {
+        function scheduleIceReconnect(reason, delayMs = 8000) {
             if (iceReconnectScheduled || connectInProgress) {
                 return;
             }
             if (connectRetryCount >= MAX_CONNECT_RETRIES) {
                 setStatus("Failed — нажмите Connect", "error");
                 return;
+            }
+            if (sessionStableSince > 0 && Date.now() - sessionStableSince < 45000) {
+                log(`Переподключение отложено — сессия была стабильна (${reason})`, "warn");
+                delayMs = Math.max(delayMs, 15000);
             }
             iceReconnectScheduled = true;
             clearIceReconnectTimer();
@@ -1059,9 +1070,28 @@
             setRomeoMsgDisplayed(lastRomeoMsgDisplayed);
         }
 
+        let lastFramesDecoded = 0;
+        let lastStatsTs = 0;
+
+        function updateVideoFpsUi(fps) {
+            const el = document.getElementById("videoFps");
+            if (!el) {
+                return;
+            }
+            if (fps == null || !Number.isFinite(fps)) {
+                el.textContent = "FPS: —";
+                return;
+            }
+            el.textContent = `FPS: ${fps.toFixed(1)}`;
+            el.style.color = fps >= 18 ? "#81c784" : fps >= 10 ? "#ffb74d" : "#ef5350";
+        }
+
         function startWebrtcStats() {
             stopStatsTimer();
             let statsTick = 0;
+            lastFramesDecoded = 0;
+            lastStatsTs = 0;
+            updateVideoFpsUi(null);
             statsTimer = setInterval(async () => {
                 if (!pc) {
                     return;
@@ -1069,24 +1099,49 @@
                 try {
                     statsTick += 1;
                     const stats = await pc.getStats();
-                    let inbound = null;
+                    let inboundV = null;
+                    let inboundA = null;
                     stats.forEach((r) => {
                         if (r.type === "inbound-rtp" && r.kind === "video") {
-                            inbound = r;
+                            inboundV = r;
+                        }
+                        if (r.type === "inbound-rtp" && r.kind === "audio") {
+                            inboundA = r;
                         }
                     });
                     const vReceivers = pc.getReceivers().filter((x) => x.track && x.track.kind === "video");
-                    if (vReceivers.length === 0) {
+                    if (vReceivers.length === 0 && statsTick <= 2) {
                         log("Нет video receiver — в answer нет видео m-line?", "warn");
                     }
-                    if (inbound && inbound.packetsReceived > 0) {
-                        const fd = inbound.framesDecoded;
-                        log(
-                            `RTP video: packets=${inbound.packetsReceived} bytes=${inbound.bytesReceived} ` +
-                                `framesDecoded=${fd ?? "n/a"} keyFrames=${inbound.keyFramesDecoded ?? "n/a"}`,
-                            "info",
-                        );
-                        if (fd === 0 && (inbound.bytesReceived || 0) > 5000) {
+                    if (inboundV && inboundV.packetsReceived > 0) {
+                        const fd = inboundV.framesDecoded;
+                        const now = performance.now();
+                        let fps = inboundV.framesPerSecond;
+                        if ((fps == null || fps === 0) && fd != null && lastStatsTs > 0) {
+                            const dt = (now - lastStatsTs) / 1000;
+                            if (dt > 0.5) {
+                                fps = (fd - lastFramesDecoded) / dt;
+                            }
+                        }
+                        if (fd != null) {
+                            lastFramesDecoded = fd;
+                            lastStatsTs = now;
+                        }
+                        if (fps != null && Number.isFinite(fps) && fps > 0) {
+                            updateVideoFpsUi(fps);
+                        }
+                        if (statsTick === 1 || statsTick % 3 === 0) {
+                            const ice = pc.iceConnectionState;
+                            const cs = pc.connectionState;
+                            const ap = inboundA?.packetsReceived ?? 0;
+                            const ab = inboundA?.bytesReceived ?? 0;
+                            log(
+                                `[stability] ice=${ice} conn=${cs} fps=${fps != null && fps > 0 ? fps.toFixed(1) : "?"} ` +
+                                    `video_pkt=${inboundV.packetsReceived} audio_pkt=${ap} audio_bytes=${ab}`,
+                                fps != null && fps >= 12 ? "success" : "warn",
+                            );
+                        }
+                        if (fd === 0 && (inboundV.bytesReceived || 0) > 5000) {
                             log(
                                 "Пакеты идут, decode=0 — на Pi смените H.264 на Constrained Baseline (profile-level-id 42e01f) или совместимый с Chrome",
                                 "warn",
@@ -1294,8 +1349,23 @@
             }
         }
 
+        let lastAutoConnectAt = 0;
+        let sessionStableSince = 0;
+
         function scheduleAutoConnect(reason) {
             if (!autoConnectOnNeedOffer || connectInProgress) {
+                return;
+            }
+            if (
+                signalingLoopActive &&
+                (reason === "pi-waiting" || reason === "pi-relaunch")
+            ) {
+                log(`Авто-Connect (${reason}) пропущен — идёт signaling`, "info");
+                return;
+            }
+            const now = Date.now();
+            if (now - lastAutoConnectAt < 12000 && reason !== "user-connect") {
+                log(`Авто-Connect (${reason}) пропущен — debounce 12s`, "info");
                 return;
             }
             const allowWithoutGesture = [
@@ -1315,7 +1385,8 @@
             if (!tok) {
                 return;
             }
-            log(`Авто-Connect (${reason}) через 1 с…`, "info");
+            log(`Авто-Connect (${reason}) через 2 с…`, "info");
+            lastAutoConnectAt = now;
             setTimeout(() => {
                 if (connectInProgress) {
                     return;
@@ -1327,7 +1398,7 @@
                     return;
                 }
                 void startConnection();
-            }, 1000);
+            }, 2000);
         }
 
         async function syncRemoteIceOnly() {
@@ -1814,6 +1885,7 @@
                     clearIceReconnectTimer();
                     clearAnswerWaitTimer();
                     connectRetryCount = 0;
+                    sessionStableSince = Date.now();
                     setStatus(HETZNER_RELAY_ONLY ? "Connected (Hetzner)" : "Connected", "connected");
                     log(HETZNER_RELAY_ONLY ? "WebRTC connected via Hetzner relay!" : "WebRTC connected!", "success");
                     void playRemoteAudio();
@@ -1834,12 +1906,19 @@
                                 (pc.iceConnectionState === "disconnected" ||
                                     pc.iceConnectionState === "failed")
                             ) {
-                                scheduleIceReconnect("still-disconnected", 1000);
+                                scheduleIceReconnect("still-disconnected", 12000);
                             }
-                        }, 12000);
+                        }, 25000);
                     }
                 } else if (pc.iceConnectionState === "failed") {
                     stopIceDiagTimer();
+                    if (
+                        sessionStableSince > 0 &&
+                        Date.now() - sessionStableSince > 30000 &&
+                        lastFramesDecoded > 60
+                    ) {
+                        log("ICE failed после стабильной сессии — мягкое переподключение", "warn");
+                    }
                     stopStatsTimer();
                     setStatus("Disconnected", "error");
                     log("ICE failed — проверьте TURN на VPS (UDP 3478 + 49160–65535)", "error");
@@ -1848,7 +1927,7 @@
                     void logIcePairDiagnostics("failed");
                     void logCallerCandidatesCount();
                     void logNominatedIcePath();
-                    scheduleIceReconnect("ice-failed", 2000);
+                    scheduleIceReconnect("ice-failed", 10000);
                 }
             };
 
@@ -1993,7 +2072,7 @@
             window.__webrtcMarkReady();
         }
         log(`VPS room: ${getRoomPath()} · signaling ${signalApiBase}`, "info");
-        log("Operator build: 2026-06-12 (clear-stale-answer)", "success");
+        log("Operator build: 2026-06-12 (session-stable)", "success");
         void refreshHostTelemetryOnce();
         const qsBoot = new URLSearchParams(window.location.search);
         const autostartShare =

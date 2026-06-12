@@ -58,6 +58,16 @@ class _VpsHttp:
     def clear_room(self) -> None:
         self._request("DELETE", (), auth=True)
 
+    def clear_callee_side(self) -> None:
+        url = self._url()
+        req = urllib.request.Request(
+            url,
+            method="DELETE",
+            headers={**self._headers(auth=True), "X-Clear": "callee"},
+        )
+        with urllib.request.urlopen(req, timeout=35) as resp:
+            resp.read()
+
     def wait_events(self, timeout: float = 25.0) -> dict[str, Any]:
         url = (
             f"{self._url('events')}?since={self._since}"
@@ -137,9 +147,11 @@ class VpsSignaling:
     async def reset_room_for_host_launch(self, launch_id: int) -> None:
         def _go() -> None:
             try:
-                self._http.clear_room()
+                # Не удалять offer оператора — иначе при пробуждении из powerSave
+                # браузер уже отправил offer, а clear_room() его стирает.
+                self._http.clear_callee_side()
             except urllib.error.HTTPError as e:
-                log.debug("VPS: clear_room: %s", e)
+                log.debug("VPS: clear_callee_side: %s", e)
             self._http.set_host({
                 "needOffer": True,
                 "hostLaunchId": launch_id,

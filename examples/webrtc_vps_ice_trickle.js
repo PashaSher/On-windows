@@ -17,13 +17,16 @@ function parseCandidateTyp(line) {
  */
 export function attachVpsIceTrickle(apiBase, roomIdOrPath, pc, role, hooks = {}) {
     const remoteRelayOnly = !!hooks.remoteRelayOnly;
+    const localTcpRelayOnly = !!hooks.localTcpRelayOnly;
     const iceToken = hooks.iceToken || "";
     const isCaller = role === "caller";
     const postRemote = isCaller ? signalPostCallerCandidate : signalPostCalleeCandidate;
     const remoteKey = isCaller ? "calleeCandidates" : "callerCandidates";
 
     const pending = [];
+    const pendingUdpRelay = [];
     const appliedKeys = new Set();
+    let tcpRelayPosted = false;
     let prevOnIceCandidate = pc.onicecandidate;
 
     function rawKey(raw) {
@@ -40,9 +43,26 @@ export function attachVpsIceTrickle(apiBase, roomIdOrPath, pc, role, hooks = {})
         if (!event.candidate) {
             return;
         }
+        const line = event.candidate.candidate || "";
+        const isUdpRelay =
+            localTcpRelayOnly && /\btyp relay\b/i.test(line) && /\s1\s+udp\s+/i.test(line);
+        const isTcpRelay =
+            localTcpRelayOnly && /\btyp relay\b/i.test(line) && /\s1\s+tcp\s+/i.test(line);
+        if (isUdpRelay && !tcpRelayPosted) {
+            pendingUdpRelay.push(event.candidate);
+            hooks.onLocalCandidate?.(event.candidate, null, { skipped: true, reason: "udp-relay-queued" });
+            return;
+        }
+        if (isUdpRelay) {
+            hooks.onLocalCandidate?.(event.candidate, null, { skipped: true, reason: "udp-relay" });
+            return;
+        }
         const raw = event.candidate.toJSON();
         const post = isCaller ? signalPostCallerCandidate : signalPostCalleeCandidate;
         void post(apiBase, roomIdOrPath, raw, iceToken).catch((e) => hooks.onError?.(e));
+        if (isTcpRelay) {
+            tcpRelayPosted = true;
+        }
         hooks.onLocalCandidate?.(event.candidate, raw);
     };
 
@@ -98,11 +118,28 @@ export function attachVpsIceTrickle(apiBase, roomIdOrPath, pc, role, hooks = {})
         return chain;
     }
 
+    async function flushUdpRelayFallback() {
+        if (!localTcpRelayOnly || tcpRelayPosted || pendingUdpRelay.length === 0) {
+            return 0;
+        }
+        const post = isCaller ? signalPostCallerCandidate : signalPostCalleeCandidate;
+        let n = 0;
+        for (const cand of pendingUdpRelay) {
+            const raw = cand.toJSON();
+            await post(apiBase, roomIdOrPath, raw, iceToken).catch((e) => hooks.onError?.(e));
+            hooks.onLocalCandidate?.(cand, raw, { fallback: true, reason: "udp-relay-fallback" });
+            n += 1;
+        }
+        pendingUdpRelay.length = 0;
+        return n;
+    }
+
     return {
         detach() {
             pc.onicecandidate = prevOnIceCandidate;
         },
         flushPending,
+        flushUdpRelayFallback,
         applySnapshotCandidates,
         notifyRemoteDescriptionSet: flushPending,
     };

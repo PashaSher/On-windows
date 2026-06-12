@@ -219,10 +219,18 @@ class Handler(BaseHTTPRequestHandler):
             self._json_response(401, {"error": "unauthorized"})
             return True
         if not tail:
-            if self.headers.get("X-Clear", "").lower() == "caller":
+            clear_mode = self.headers.get("X-Clear", "").lower()
+            if clear_mode == "caller":
                 STORE.clear_caller_side(room)
+            elif clear_mode in ("callee", "answer"):
+                STORE.clear_callee_side(room)
             else:
-                STORE.clear_room(room)
+                # Legacy Pi clear_room() при пробуждении: не удалять offer оператора.
+                snap = STORE.snapshot(room)
+                if snap.get("offer"):
+                    STORE.clear_callee_side(room)
+                else:
+                    STORE.clear_room(room)
             self._json_response(200, {"ok": True})
             return True
         return False

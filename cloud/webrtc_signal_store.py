@@ -82,12 +82,19 @@ class SignalStore:
         r = self._room(room_id)
         with r.cond:
             r.offer = data
+            # Новый или снятый offer — старый answer/ICE Pi недействителен (иначе браузер ловит Failed).
+            r.answer = None
+            r.callee_candidates.clear()
             r.bump()
 
     def set_answer(self, room_id: str, data: dict[str, Any] | None) -> None:
         r = self._room(room_id)
         with r.cond:
+            if data is not None and r.offer is None:
+                return
             r.answer = data
+            if data is None:
+                r.callee_candidates.clear()
             r.bump()
 
     def set_host(self, room_id: str, patch: dict[str, Any]) -> None:
@@ -117,6 +124,16 @@ class SignalStore:
         with r.cond:
             r.offer = None
             r.caller_candidates.clear()
+            r.answer = None
+            r.callee_candidates.clear()
+            r.bump()
+
+    def clear_callee_side(self, room_id: str) -> None:
+        """Сброс answer/ICE Pi без удаления offer браузера."""
+        r = self._room(room_id)
+        with r.cond:
+            r.answer = None
+            r.callee_candidates.clear()
             r.bump()
 
     def clear_room(self, room_id: str) -> None:

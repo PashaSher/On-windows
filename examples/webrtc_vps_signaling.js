@@ -81,6 +81,25 @@ export async function signalClearCallerSide(apiBase, roomId, iceToken = "") {
     }
 }
 
+/** Сброс answer и ICE Pi (без удаления offer). Нужен перед новым Connect. */
+export async function signalClearCalleeSide(apiBase, roomId, iceToken = "") {
+    const url = roomApiUrl(apiBase, roomId);
+    const res = await fetch(url, {
+        method: "DELETE",
+        cache: "no-store",
+        headers: { ...authHeaders(iceToken), "X-Clear": "callee" },
+    });
+    if (!res.ok) {
+        throw new Error(`signal clear callee ${res.status}`);
+    }
+}
+
+/** Полный сброс offer/answer/ICE перед новым Connect. */
+export async function signalClearSession(apiBase, roomId, iceToken = "") {
+    await signalClearCallerSide(apiBase, roomId, iceToken);
+    await signalClearCalleeSide(apiBase, roomId, iceToken);
+}
+
 /** Полный сброс комнаты (offer/answer/ICE) перед новым Connect. */
 export async function signalClearRoom(apiBase, roomId, iceToken = "") {
     const url = roomApiUrl(apiBase, roomId);
