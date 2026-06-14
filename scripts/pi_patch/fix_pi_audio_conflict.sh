@@ -22,8 +22,10 @@ env = Path("/home/pavel/projects/Mobile_Raspberry_5-/config/webrtc.vps.env")
 lines = env.read_text(encoding="utf-8").splitlines()
 updates = {
     "AUDIO_RELAY_PUBLISH_URL": "http://${VPS}:8788/api/audio-relay/rooms/pi-camera/publish",
+    "AUDIO_RELAY_ALSA": "plughw:2,0",
+    "AUDIO_TALK_ALSA": "plughw:2,0",
     "AUDIO_RELAY_URL": "http://${VPS}/api/audio-relay",
-    "AUDIO_TALK_LISTEN_URL": "http://${VPS}/api/audio-relay/rooms/pi-camera/talk-listen",
+    "AUDIO_TALK_LISTEN_URL": "http://${VPS}:8788/api/audio-relay/rooms/pi-camera/talk-listen",
 }
 out = []
 seen = set()

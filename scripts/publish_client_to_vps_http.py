@@ -48,7 +48,7 @@ def main() -> int:
     if build:
         print(build)
     print("8788:", f"{args.base.rsplit(':', 1)[0]}:8788/webrtc-client.html?room=pi-camera&autostart=1")
-    print("Note: /cam on :80 uses nginx static until symlink or nginx proxy is applied on VPS.")
+    print("Ссылка:", "https://116.203.148.254/cam")
     return 0
 
 

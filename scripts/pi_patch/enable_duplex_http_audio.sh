@@ -42,7 +42,7 @@ updates = {
     "AUDIO_RELAY_URL": "${VPS_AUDIO_BASE}",
     "AUDIO_RELAY_PUBLISH_URL": "${VPS_PUBLISH_BASE}/rooms/pi-camera/publish",
     "AUDIO_TALK_ENABLED": "1",
-    "AUDIO_TALK_LISTEN_URL": "${VPS_AUDIO_BASE}/rooms/pi-camera/talk-listen",
+    "AUDIO_TALK_LISTEN_URL": "${VPS_PUBLISH_BASE}/rooms/pi-camera/talk-listen",
     "ICE_CONFIG_TOKEN": "$ICE_TOKEN",
 }
 seen = set()

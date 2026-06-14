@@ -54,17 +54,96 @@
         }
         .telemetry-item.telemetry--low { color: #ef9a9a; }
         .telemetry-item.telemetry--offline { color: #ffab91; }
-        .btn-mic-talk {
-            background: transparent;
-            border: 1px solid #37474f;
-            border-radius: 6px;
-            padding: 2px 8px;
-            cursor: pointer;
-            font: inherit;
+        .mic-talk-row {
+            max-width: 520px;
+            margin: 12px auto 0;
+            text-align: center;
         }
-        .btn-mic-talk.mic--ok { color: #81c784; border-color: #2e7d32; }
-        .btn-mic-talk.mic--pending { color: #ffcc80; }
-        .btn-mic-talk.mic--denied { color: #ffab91; }
+        .btn-mic-ptt {
+            display: inline-flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            width: min(44vw, 148px);
+            height: min(44vw, 148px);
+            max-width: 148px;
+            max-height: 148px;
+            border-radius: 50%;
+            border: 3px solid #607d8b;
+            background: linear-gradient(160deg, #546e7a 0%, #263238 100%);
+            color: #eceff1;
+            cursor: pointer;
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+            transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+        }
+        .btn-mic-ptt:active { transform: scale(0.96); }
+        .btn-mic-ptt__icon {
+            font-size: 2rem;
+            line-height: 1;
+        }
+        .btn-mic-ptt__label {
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            text-transform: uppercase;
+            line-height: 1.15;
+            max-width: 9em;
+        }
+        .btn-mic-ptt.mic--ok {
+            border-color: #ff5252;
+            background: linear-gradient(160deg, #ff7043 0%, #c62828 100%);
+            box-shadow: 0 0 0 4px rgba(255, 82, 82, 0.35), 0 8px 22px rgba(198, 40, 40, 0.45);
+            color: #fff;
+        }
+        .btn-mic-ptt.mic--pending {
+            border-color: #ffb74d;
+            background: linear-gradient(160deg, #ffb74d 0%, #f57c00 100%);
+            color: #1a1a1a;
+            animation: mic-pulse 1s ease-in-out infinite;
+        }
+        .btn-mic-ptt.mic--denied {
+            border-color: #8d6e63;
+            background: linear-gradient(160deg, #8d6e63 0%, #4e342e 100%);
+            opacity: 0.85;
+        }
+        .btn-mic-ptt.mic--https {
+            border-color: #42a5f5;
+            background: linear-gradient(160deg, #29b6f6 0%, #1565c0 100%);
+            color: #fff;
+            box-shadow: 0 0 0 4px rgba(66, 165, 245, 0.28), 0 8px 22px rgba(21, 101, 192, 0.35);
+        }
+        .mic-https-banner {
+            display: none;
+            max-width: 520px;
+            margin: 10px auto 0;
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid rgba(66, 165, 245, 0.45);
+            background: rgba(21, 101, 192, 0.22);
+            color: #e3f2fd;
+            font-size: 0.78rem;
+            line-height: 1.4;
+            text-align: center;
+        }
+        .mic-https-banner.is-visible { display: block; }
+        .mic-https-banner a {
+            color: #4fc3f7;
+            font-weight: 700;
+        }
+        @keyframes mic-pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(255, 183, 77, 0.45); }
+            50% { box-shadow: 0 0 0 8px rgba(255, 183, 77, 0.15); }
+        }
+        .mic-talk-hint {
+            margin: 8px 8px 0;
+            font-size: 0.72rem;
+            line-height: 1.35;
+            color: #90a4ae;
+        }
         .telemetry-age {
             font-size: 0.68rem;
             color: #78909c;
@@ -163,6 +242,7 @@
             .control-dock .romeo-msg-row,
             .control-dock .btn-round,
             .control-dock .btn-msg,
+            .control-dock .btn-mic-ptt,
             .control-dock input {
                 pointer-events: auto;
             }
@@ -332,6 +412,19 @@
             .joystick { width: 130px; height: 130px; }
         }
     </style>
+    <script>
+        (function () {
+            var host = location.hostname;
+            var port = location.port || (location.protocol === "https:" ? "443" : "80");
+            if (host === "116.203.148.254" && location.protocol === "http:" && port === "8788") {
+                var qs = location.search || "";
+                if (qs.indexOf("autostart") < 0) {
+                    qs += (qs ? "&" : "?") + "autostart=1";
+                }
+                location.replace("https://" + host + "/cam" + qs);
+            }
+        })();
+    </script>
 </head>
 <body>
     <header>
@@ -346,7 +439,6 @@
         </div>
         <span class="telemetry-item" id="videoFps" title="Входящий FPS (WebRTC stats)">FPS: —</span>
         <span class="telemetry-item" id="piAudioStatus" title="Звук Pi — отдельный HTTP-поток (всегда при Connected)">🔊 —</span>
-        <button type="button" id="btnMicTalk" class="telemetry-item btn-mic-talk" title="Микрофон → динамик Pi (нажмите после Connect)">🎤 —</button>
         <span id="status">Disconnected</span>
     </header>
 
@@ -377,6 +469,24 @@
                         <div id="joyTurret" aria-label="Джойстик камеры"></div>
                     </div>
                 </div>
+                <div class="mic-https-banner" id="micHttpsBanner">
+                    Микрофон браузера блокируется по <strong>HTTP</strong>.
+                    <a id="micHttpsLink" href="https://116.203.148.254/cam">Откройте HTTPS /cam</a>
+                    — там Chrome разрешит микрофон.
+                </div>
+                <div class="mic-talk-row">
+                    <button
+                        type="button"
+                        id="btnMicTalk"
+                        class="btn-mic-ptt"
+                        aria-pressed="false"
+                        title="Держите — говорить в динамик Pi. Отпустите — снова услышите Pi."
+                    >
+                        <span class="btn-mic-ptt__icon" id="btnMicTalkIcon" aria-hidden="true">🎤</span>
+                        <span class="btn-mic-ptt__label" id="btnMicTalkLabel">Говорить в Pi</span>
+                    </button>
+                    <p class="mic-talk-hint">Держите кнопку — говорите в Pi. Отпустите — снова услышите звук с Pi.</p>
+                </div>
                 <div class="romeo-msg-row">
                     <input type="text" id="romeoMsgInput" placeholder="" maxlength="120" autocomplete="off">
                     <button type="button" class="btn-msg btn-msg-clear" id="btnRomeoMsgClr" title="Очистить дисплей Romeo">CLR</button>
@@ -384,9 +494,7 @@
                 </div>
                 <p class="romeo-msg-hint">Data Channel: {"romeo":"MSG текст"} → /dev/ttyACM0</p>
                 <div class="access-hint" id="accessHint">
-                    Если Cloudflare ошибка <strong>1033</strong> — Pi сменил Wi‑Fi, ссылка устарела.
-                    Стабильно: <a id="linkVpsCam" href="http://116.203.148.254/cam">116.203.148.254/cam</a>
-                    · Tailscale: <a href="http://100.73.9.95:8888/cam">100.73.9.95:8888/cam</a>
+                    Ссылка: <a id="linkVpsCam" href="https://116.203.148.254/cam">https://116.203.148.254/cam</a>
                 </div>
             </div>
         </div>
@@ -608,6 +716,9 @@
         let pcMicMuteGain = null;
         let pcMicSource = null;
         let pcMicActive = false;
+        let pcMicStarting = false;
+        let pcMicPointerDown = false;
+        const OPERATOR_URL = "https://116.203.148.254/cam";
         /** Один AudioContext на оба направления — resume() успевает в жесте Connect. */
         let duplexAudioCtx = null;
         const PI_AUDIO_SAMPLE_RATE = 16000;
@@ -1639,27 +1750,121 @@ registerProcessor("pc-mic-capture", PcMicCapture);
             }
         }
 
+        function isPcMicEngaged() {
+            return pcMicActive || pcMicStarting;
+        }
+
         function setMicStatus(state, title) {
             const btn = document.getElementById("btnMicTalk");
+            const icon = document.getElementById("btnMicTalkIcon");
+            const label = document.getElementById("btnMicTalkLabel");
             if (!btn) {
                 return;
             }
-            btn.classList.remove("mic--ok", "mic--pending", "mic--denied");
+            btn.classList.remove("mic--ok", "mic--pending", "mic--denied", "mic--https");
+            btn.setAttribute("aria-pressed", state === "ok" ? "true" : "false");
             if (state === "ok") {
-                btn.textContent = "🎤 вкл";
+                if (icon) {
+                    icon.textContent = "⏹";
+                }
+                if (label) {
+                    label.textContent = "Говорите";
+                }
                 btn.classList.add("mic--ok");
             } else if (state === "denied" || state === "off") {
-                btn.textContent = "🎤 выкл";
+                if (icon) {
+                    icon.textContent = "🎤";
+                }
+                if (label) {
+                    label.textContent = "Ошибка доступа";
+                }
                 btn.classList.add("mic--denied");
-            } else if (state === "pending" || state === "waiting") {
-                btn.textContent = "🎤 …";
+            } else if (state === "https") {
+                if (icon) {
+                    icon.textContent = "🔒";
+                }
+                if (label) {
+                    label.textContent = "Открыть HTTPS";
+                }
+                btn.classList.add("mic--https");
+            } else if (state === "pending") {
+                if (icon) {
+                    icon.textContent = "🎤";
+                }
+                if (label) {
+                    label.textContent = "Подключение…";
+                }
                 btn.classList.add("mic--pending");
             } else {
-                btn.textContent = "🎤 —";
+                if (icon) {
+                    icon.textContent = "🎤";
+                }
+                if (label) {
+                    label.textContent = "Держите";
+                }
             }
             if (title) {
                 btn.title = title;
             }
+        }
+
+        function micSecureContextOk() {
+            if (window.isSecureContext) {
+                return true;
+            }
+            const h = window.location.hostname;
+            return h === "127.0.0.1" || h === "localhost";
+        }
+
+        function micHttpsHint() {
+            return getMicHttpsUrl();
+        }
+
+        function getMicHttpsUrl() {
+            const host = window.location.hostname || "116.203.148.254";
+            const qs = new URLSearchParams(window.location.search);
+            if (!qs.has("room")) {
+                qs.set("room", getRoomId());
+            }
+            qs.set("autostart", "1");
+            qs.set("share", "1");
+            if (host === "116.203.148.254") {
+                return OPERATOR_URL + "?" + qs.toString();
+            }
+            return `https://${host}/cam?${qs.toString()}`;
+        }
+
+        function openMicHttpsPage() {
+            const url = getMicHttpsUrl();
+            log("Микрофон только по HTTPS — переход: " + url, "warn");
+            window.location.assign(url);
+        }
+
+        function initMicSecureContextUi() {
+            const banner = document.getElementById("micHttpsBanner");
+            const link = document.getElementById("micHttpsLink");
+            const url = getMicHttpsUrl();
+            if (link) {
+                link.href = url;
+            }
+            if (micSecureContextOk()) {
+                if (banner) {
+                    banner.classList.remove("is-visible");
+                }
+                setMicStatus("idle", "Держите кнопку — говорить в динамик Pi");
+                return;
+            }
+            if (banner) {
+                banner.classList.add("is-visible");
+            }
+            setMicStatus(
+                "https",
+                "Микрофон заблокирован на HTTP — нажмите, чтобы открыть HTTPS",
+            );
+            log(
+                "Микрофон недоступен на HTTP. Для разговора откройте " + url,
+                "warn",
+            );
         }
 
         function getRelayToken() {
@@ -1923,9 +2128,10 @@ registerProcessor("pc-mic-capture", PcMicCapture);
             return url;
         }
 
-        function stopPcMicHttpRelay(resetStatus = true) {
+        function stopPcMicTalkSession(resetStatus = true) {
             pcMicRelayGeneration += 1;
             pcMicActive = false;
+            pcMicStarting = false;
             if (pcMicWs) {
                 try {
                     pcMicWs.onopen = null;
@@ -1955,13 +2161,27 @@ registerProcessor("pc-mic-capture", PcMicCapture);
                 } catch (_) {}
                 pcMicSource = null;
             }
+            if (resetStatus) {
+                setMicStatus("idle", "Держите кнопку — говорить в динамик Pi");
+            }
+        }
+
+        function stopPcMicHttpRelay(resetStatus = true) {
+            stopPcMicTalkSession(false);
             if (pcMicStream) {
                 pcMicStream.getTracks().forEach((t) => t.stop());
                 pcMicStream = null;
             }
             if (resetStatus) {
-                setMicStatus("idle", "Нажмите 🎤 — говорить в динамик Pi");
+                setMicStatus("idle", "Держите кнопку — говорить в динамик Pi");
             }
+        }
+
+        function pcMicStreamLive() {
+            return (
+                pcMicStream &&
+                pcMicStream.getAudioTracks().some((t) => t.readyState === "live")
+            );
         }
 
         function wirePcMicDownsample(ctx, stream, ws, gen) {
@@ -2013,68 +2233,112 @@ registerProcessor("pc-mic-capture", PcMicCapture);
                 setMicStatus("idle", "Микрофон выкл. (?mic=0)");
                 return;
             }
-            stopPcMicHttpRelay(false);
+            if (!micSecureContextOk()) {
+                openMicHttpsPage();
+                return;
+            }
+            stopPcMicTalkSession(false);
             pcMicRelayGeneration += 1;
             const gen = pcMicRelayGeneration;
+            pcMicStarting = true;
             const wsUrl = getTalkPublishWsUrl();
-            setMicStatus("pending", "Микрофон → Pi…");
+            setMicStatus("pending", "Подключение микрофона…");
             unlockDuplexAudio();
             try {
                 if (!navigator.mediaDevices?.getUserMedia) {
                     throw new Error("getUserMedia недоступен — откройте https://116.203.148.254/cam");
                 }
-                pcMicStream = await navigator.mediaDevices.getUserMedia({
-                    audio: {
-                        deviceId: { ideal: "default" },
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        autoGainControl: true,
-                        channelCount: 1,
-                    },
-                    video: false,
-                });
+                if (!pcMicStreamLive()) {
+                    pcMicStream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            deviceId: { ideal: "default" },
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true,
+                            channelCount: 1,
+                        },
+                        video: false,
+                    });
+                }
                 const ctx = await ensureDuplexAudioContextRunning();
                 const ws = new WebSocket(wsUrl);
                 ws.binaryType = "arraybuffer";
                 pcMicWs = ws;
-                let sent = false;
                 await new Promise((resolve, reject) => {
                     ws.onopen = () => resolve();
                     ws.onerror = () => reject(new Error("WebSocket talk-publish-ws"));
-                ws.onclose = () => {
-                    if (gen !== pcMicRelayGeneration) {
-                        return;
-                    }
-                    pcMicActive = false;
-                    setMicStatus("waiting", "WS закрыт — нажмите 🎤 снова");
-                };
+                    ws.onclose = () => {
+                        if (gen !== pcMicRelayGeneration) {
+                            return;
+                        }
+                        pcMicActive = false;
+                        pcMicStarting = false;
+                        setMicStatus("idle", "Держите кнопку — говорить в динамик Pi");
+                    };
                 });
                 if (gen !== pcMicRelayGeneration) {
+                    stopPcMicTalkSession(false);
                     return;
                 }
                 wirePcMicDownsample(ctx, pcMicStream, ws, gen);
+                if (gen !== pcMicRelayGeneration) {
+                    stopPcMicTalkSession(false);
+                    return;
+                }
+                pcMicStarting = false;
                 pcMicActive = true;
-                setMicStatus("ok", "Микрофон → динамик Pi");
+                setMicStatus("ok", "Говорите — отпустите кнопку, чтобы снова слышать Pi");
                 log("Микрофон → Pi speaker (talk WS)", "success");
             } catch (e) {
-                setMicStatus("denied", e && e.message ? e.message : String(e));
-                log(
-                    "PC mic relay: " +
-                        (e && e.message ? e.message : String(e)) +
-                        " · на телефоне нужен HTTPS",
-                    "error",
-                );
-                stopPcMicHttpRelay(false);
+                if (gen === pcMicRelayGeneration) {
+                    pcMicStarting = false;
+                    setMicStatus("denied", e && e.message ? e.message : String(e));
+                    log(
+                        "PC mic relay: " +
+                            (e && e.message ? e.message : String(e)) +
+                            " · на телефоне нужен HTTPS",
+                        "error",
+                    );
+                }
+                stopPcMicTalkSession(false);
             }
         }
 
-        function togglePcMicHttpRelay() {
-            if (pcMicActive) {
-                stopPcMicHttpRelay(true);
-                log("Микрофон → Pi выключен", "info");
+        function resumePiAudioAfterTalk() {
+            if (!USE_PI_AUDIO_HTTP_RELAY) {
                 return;
             }
-            void startPcMicHttpRelay();
+            setPiAudioStatus("waiting", "Возобновление звука Pi…");
+            window.setTimeout(() => {
+                unlockDuplexAudio();
+                void ensureDuplexAudioContextRunning()
+                    .then(() => {
+                        void startPiAudioHttpRelay();
+                    })
+                    .catch(() => {
+                        setPiAudioStatus("waiting", "Нажмите Connect для звука Pi");
+                    });
+            }, 700);
+        }
+
+        function stopPcMicTalk() {
+            if (!isPcMicEngaged()) {
+                return;
+            }
+            stopPcMicTalkSession(true);
+            resumePiAudioAfterTalk();
+            log("Микрофон → Pi выключен", "info");
+        }
+
+        async function startPcMicTalk() {
+            if (!micSecureContextOk()) {
+                openMicHttpsPage();
+                return;
+            }
+            if (isPcMicEngaged()) {
+                return;
+            }
+            await startPcMicHttpRelay();
         }
 
         function stopPiAudioHttpRelay(resetStatus = true) {
@@ -2386,8 +2650,9 @@ registerProcessor("pc-mic-capture", PcMicCapture);
             if (USE_PI_AUDIO_HTTP_RELAY) {
                 void startPiAudioHttpRelay();
             }
+            // Микрофон только по 🎤: автозапуск глушит Pi→браузер (Voice HAT half-duplex).
             if (USE_PC_MIC_HTTP_RELAY) {
-                void startPcMicHttpRelay();
+                log("Микрофон → Pi: нажмите 🎤 (не включается автоматически — иначе пропадёт звук Pi)", "info");
             }
             document.getElementById("btnDisconnect").disabled = false;
 
@@ -2836,7 +3101,7 @@ registerProcessor("pc-mic-capture", PcMicCapture);
             window.__webrtcMarkReady();
         }
         log(`VPS room: ${getRoomPath()} · signaling ${signalApiBase}`, "info");
-        log("Operator build: 2026-06-14 (duplex-audio-fix-v14)", "success");
+        log("Operator build: 2026-06-14 (duplex-audio-talk-v20)", "success");
         if (FORCE_TCP_TURN) {
             log("ICE: TURN через TCP 3478 (udpTurn=1 — вернуть UDP relay)", "info");
         }
@@ -2865,10 +3130,40 @@ registerProcessor("pc-mic-capture", PcMicCapture);
             }
         }
 
-        document.getElementById("btnMicTalk")?.addEventListener("click", () => {
-            unlockDuplexAudio();
-            togglePcMicHttpRelay();
-        });
+        initMicSecureContextUi();
+
+        (function wireMicPttButton() {
+            const btn = document.getElementById("btnMicTalk");
+            if (!btn) {
+                return;
+            }
+            const onDown = (ev) => {
+                if (ev.button !== undefined && ev.button !== 0) {
+                    return;
+                }
+                ev.preventDefault();
+                pcMicPointerDown = true;
+                unlockDuplexAudio();
+                void startPcMicTalk();
+            };
+            const onUp = (ev) => {
+                if (!pcMicPointerDown) {
+                    return;
+                }
+                pcMicPointerDown = false;
+                ev.preventDefault();
+                stopPcMicTalk();
+            };
+            btn.addEventListener("pointerdown", onDown);
+            btn.addEventListener("pointerup", onUp);
+            btn.addEventListener("pointercancel", onUp);
+            btn.addEventListener("pointerleave", (ev) => {
+                if (pcMicPointerDown && ev.pointerType === "mouse") {
+                    onUp(ev);
+                }
+            });
+            btn.addEventListener("contextmenu", (ev) => ev.preventDefault());
+        })();
 
         document.getElementById("btnConnect")?.addEventListener("click", () => {
             void startConnection();

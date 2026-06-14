@@ -1,0 +1,41 @@
+# Google Voice HAT: dsnoop/dmix on hw:2,0 + plug for S16_LE apps.
+pcm.gvh_hw {
+    type hw
+    card 2
+    device 0
+}
+
+pcm.gvh_dmix {
+    type dmix
+    ipc_key 1024
+    slave {
+        pcm "gvh_hw"
+        rate 16000
+        channels 1
+        period_size 320
+        buffer_size 1280
+    }
+}
+
+pcm.gvh_dsnoop {
+    type dsnoop
+    ipc_key 2048
+    slave {
+        pcm "gvh_hw"
+        rate 16000
+        channels 1
+        period_size 320
+        buffer_size 1280
+    }
+}
+
+pcm.gvhduplex_raw {
+    type asym
+    playback.pcm "gvh_dmix"
+    capture.pcm "gvh_dsnoop"
+}
+
+pcm.gvhduplex {
+    type plug
+    slave.pcm "gvhduplex_raw"
+}

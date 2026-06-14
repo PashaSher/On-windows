@@ -321,13 +321,29 @@ class Handler(BaseHTTPRequestHandler):
         body = self._read_body_bytes()
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(body)
-        web_root = _operator_web_root()
-        if web_root is not None:
+        mirrored = []
+        for raw in (
+            os.environ.get("OPERATOR_WEB_ROOT", "").strip(),
+            "/var/www/operator",
+        ):
+            if not raw:
+                continue
+            web_root = Path(raw).resolve()
+            if not web_root.is_dir():
+                continue
             web_target = (web_root / rel_path).resolve()
-            if str(web_target).startswith(str(web_root)):
+            if not str(web_target).startswith(str(web_root)):
+                continue
+            try:
                 web_target.parent.mkdir(parents=True, exist_ok=True)
                 web_target.write_bytes(body)
-        self._json_response(200, {"ok": True, "path": rel_path, "bytes": len(body)})
+                mirrored.append(str(web_target))
+            except OSError:
+                pass
+        payload = {"ok": True, "path": rel_path, "bytes": len(body)}
+        if mirrored:
+            payload["mirrored"] = mirrored
+        self._json_response(200, payload)
         return True
 
     def _handle_audio_listen(self, room: str) -> bool:
@@ -483,7 +499,7 @@ class Handler(BaseHTTPRequestHandler):
                 if opcode == 0x2 and payload:
                     AUDIO_TALK.publish(room, payload)
         finally:
-            AUDIO_TALK.mark_publisher(room, False, end_listeners=True)
+            AUDIO_TALK.mark_publisher(room, False, end_listeners=False)
             try:
                 sock.shutdown(socket.SHUT_RDWR)
             except OSError:
