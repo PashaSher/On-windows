@@ -22,17 +22,99 @@ CORS: Access-Control-Allow-Origin: * (для разработки; в проде
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import json
 import mimetypes
 import os
+import socket
+import struct
 import sys
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 from typing import Iterator
 
 from webrtc_signal_store import STORE, normalize_room_id
-from audio_relay_store import AUDIO_RELAY
+from audio_relay_store import AUDIO_RELAY, AUDIO_TALK
+
+_WS_GUID = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+def _ws_accept(key: str) -> str:
+    digest = hashlib.sha1(key.encode("ascii") + _WS_GUID).digest()
+    return base64.b64encode(digest).decode("ascii")
+
+
+def _ws_send_frame(sock: socket.socket, opcode: int, data: bytes) -> None:
+    length = len(data)
+    if length < 126:
+        header = struct.pack("!BB", 0x80 | opcode, length)
+    elif length < 65536:
+        header = struct.pack("!BBH", 0x80 | opcode, 126, length)
+    else:
+        header = struct.pack("!BBQ", 0x80 | opcode, 127, length)
+    sock.sendall(header + data)
+
+
+def _ws_send_binary(sock: socket.socket, data: bytes) -> None:
+    _ws_send_frame(sock, 0x2, data)
+
+
+def _ws_read_frame(sock: socket.socket) -> tuple[int, bytes] | None:
+    hdr = sock.recv(2)
+    if len(hdr) < 2:
+        return None
+    opcode = hdr[0] & 0x0F
+    masked = bool(hdr[1] & 0x80)
+    length = hdr[1] & 0x7F
+    if length == 126:
+        ext = sock.recv(2)
+        if len(ext) < 2:
+            return None
+        length = struct.unpack("!H", ext)[0]
+    elif length == 127:
+        ext = sock.recv(8)
+        if len(ext) < 8:
+            return None
+        length = struct.unpack("!Q", ext)[0]
+    mask = b""
+    if masked:
+        mask = sock.recv(4)
+        if len(mask) < 4:
+            return None
+    payload = b""
+    while len(payload) < length:
+        part = sock.recv(length - len(payload))
+        if not part:
+            return None
+        payload += part
+    if masked:
+        payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+    return opcode, payload
+
+
+def _ws_client_loop(sock: socket.socket, stop: threading.Event) -> None:
+    sock.settimeout(1.0)
+    while not stop.is_set():
+        try:
+            frame = _ws_read_frame(sock)
+        except socket.timeout:
+            continue
+        except OSError:
+            break
+        if frame is None:
+            break
+        opcode, payload = frame
+        if opcode == 0x8:
+            break
+        if opcode == 0x9:
+            try:
+                _ws_send_frame(sock, 0xA, payload)
+            except OSError:
+                break
+    stop.set()
 
 DEFAULT_STUN = [
     {"urls": "stun:stun.l.google.com:19302"},
@@ -239,6 +321,12 @@ class Handler(BaseHTTPRequestHandler):
         body = self._read_body_bytes()
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(body)
+        web_root = _operator_web_root()
+        if web_root is not None:
+            web_target = (web_root / rel_path).resolve()
+            if str(web_target).startswith(str(web_root)):
+                web_target.parent.mkdir(parents=True, exist_ok=True)
+                web_target.write_bytes(body)
         self._json_response(200, {"ok": True, "path": rel_path, "bytes": len(body)})
         return True
 
@@ -249,23 +337,19 @@ class Handler(BaseHTTPRequestHandler):
         q = AUDIO_RELAY.register_listener(room)
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
-        self.send_header("Transfer-Encoding", "chunked")
+        self.send_header("Connection", "close")
+        self.send_header("X-Accel-Buffering", "no")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         try:
             for chunk in AUDIO_RELAY.iter_listener(room, q):
-                self._write_chunked(chunk)
+                self.wfile.write(chunk)
+                self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
         finally:
             AUDIO_RELAY.unregister_listener(room, q)
-            try:
-                self._write_chunked(b"")
-                self.wfile.write(b"0\r\n\r\n")
-                self.wfile.flush()
-            except OSError:
-                pass
         return True
 
     def _handle_audio_publish(self, room: str) -> bool:
@@ -287,12 +371,132 @@ class Handler(BaseHTTPRequestHandler):
         self._json_response(200, {"ok": True, "bytes": total})
         return True
 
+    def _handle_audio_listen_ws(self, room: str) -> bool:
+        if not _auth_ok(self):
+            self._json_response(401, {"error": "unauthorized"})
+            return True
+        ws_key = (self.headers.get("Sec-WebSocket-Key") or "").strip()
+        if not ws_key:
+            self.send_error(400, "WebSocket upgrade required")
+            return True
+        self.send_response(101)
+        self.send_header("Upgrade", "websocket")
+        self.send_header("Connection", "Upgrade")
+        self.send_header("Sec-WebSocket-Accept", _ws_accept(ws_key))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        q = AUDIO_RELAY.register_listener(room)
+        sock = self.connection
+        stop = threading.Event()
+        reader = threading.Thread(target=_ws_client_loop, args=(sock, stop), daemon=True)
+        reader.start()
+        try:
+            for chunk in AUDIO_RELAY.iter_listener(room, q):
+                if stop.is_set():
+                    break
+                try:
+                    _ws_send_binary(sock, chunk)
+                except OSError:
+                    break
+        finally:
+            stop.set()
+            AUDIO_RELAY.unregister_listener(room, q)
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        return True
+
+    def _handle_talk_listen(self, room: str) -> bool:
+        if not _auth_ok(self):
+            self._json_response(401, {"error": "unauthorized"})
+            return True
+        q = AUDIO_TALK.register_listener(room)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Connection", "close")
+        self.send_header("X-Accel-Buffering", "no")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        try:
+            for chunk in AUDIO_TALK.iter_listener(room, q):
+                self.wfile.write(chunk)
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            AUDIO_TALK.unregister_listener(room, q)
+        return True
+
+    def _handle_talk_publish(self, room: str) -> bool:
+        if not _auth_ok(self):
+            self._json_response(401, {"error": "unauthorized"})
+            return True
+        AUDIO_TALK.mark_publisher(room, True)
+        total = 0
+        try:
+            for chunk in self._iter_request_body_chunks():
+                total += len(chunk)
+                AUDIO_TALK.publish(room, chunk)
+        finally:
+            AUDIO_TALK.mark_publisher(room, False, end_listeners=True)
+        self._json_response(200, {"ok": True, "bytes": total})
+        return True
+
+    def _handle_talk_publish_ws(self, room: str) -> bool:
+        if not _auth_ok(self):
+            self._json_response(401, {"error": "unauthorized"})
+            return True
+        ws_key = (self.headers.get("Sec-WebSocket-Key") or "").strip()
+        if not ws_key:
+            self.send_error(400, "WebSocket upgrade required")
+            return True
+        self.send_response(101)
+        self.send_header("Upgrade", "websocket")
+        self.send_header("Connection", "Upgrade")
+        self.send_header("Sec-WebSocket-Accept", _ws_accept(ws_key))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        sock = self.connection
+        AUDIO_TALK.mark_publisher(room, True)
+        sock.settimeout(1.0)
+        try:
+            while True:
+                try:
+                    frame = _ws_read_frame(sock)
+                except socket.timeout:
+                    continue
+                except OSError:
+                    break
+                if frame is None:
+                    break
+                opcode, payload = frame
+                if opcode == 0x8:
+                    break
+                if opcode == 0x9:
+                    try:
+                        _ws_send_frame(sock, 0xA, payload)
+                    except OSError:
+                        break
+                    continue
+                if opcode == 0x2 and payload:
+                    AUDIO_TALK.publish(room, payload)
+        finally:
+            AUDIO_TALK.mark_publisher(room, False, end_listeners=True)
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        return True
+
     def _handle_audio_status(self, room: str) -> bool:
         self._json_response(
             200,
             {
                 "room": room,
                 "publisherActive": AUDIO_RELAY.publisher_active(room),
+                "talkPublisherActive": AUDIO_TALK.publisher_active(room),
             },
         )
         return True
@@ -305,10 +509,18 @@ class Handler(BaseHTTPRequestHandler):
         room = normalize_room_id(room)
         if method == "GET" and tail == ["listen"]:
             return self._handle_audio_listen(room)
+        if method == "GET" and tail == ["listen-ws"]:
+            return self._handle_audio_listen_ws(room)
         if method == "GET" and tail == ["status"]:
             return self._handle_audio_status(room)
         if method == "POST" and tail == ["publish"]:
             return self._handle_audio_publish(room)
+        if method == "GET" and tail == ["talk-listen"]:
+            return self._handle_talk_listen(room)
+        if method == "GET" and tail == ["talk-publish-ws"]:
+            return self._handle_talk_publish_ws(room)
+        if method == "POST" and tail == ["talk-publish"]:
+            return self._handle_talk_publish(room)
         if method == "OPTIONS":
             return False
         self._json_response(404, {"error": "not found"})
@@ -499,7 +711,11 @@ def main() -> None:
     if web_root:
         print(f"Operator static: {web_root} (e.g. /webrtc-client.html)", file=sys.stderr, flush=True)
     print("Signaling: GET/PUT/POST /api/signal/rooms/<id>/...", file=sys.stderr, flush=True)
-    print("Audio relay: GET .../listen, POST .../publish", file=sys.stderr, flush=True)
+    print(
+        "Audio relay: listen, listen-ws, publish, talk-listen, talk-publish-ws",
+        file=sys.stderr,
+        flush=True,
+    )
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

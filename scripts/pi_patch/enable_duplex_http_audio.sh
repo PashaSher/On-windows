@@ -7,6 +7,9 @@ set -euo pipefail
 HOST="${PI_HOST:-pavel@100.73.9.95}"
 export SSHPASS="${PI_SSH_PASS:-2214}"
 ICE_TOKEN="${ICE_TOKEN:-698567c765668e1abf9c7456c0d89991fd65ac8c606f262e}"
+VPS="${VPS:-116.203.148.254}"
+VPS_AUDIO_BASE="http://${VPS}/api/audio-relay"
+VPS_PUBLISH_BASE="http://${VPS}:8788/api/audio-relay"
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 REMOTE_PROXY="/home/pavel/operator-proxy"
 REMOTE_WEB="/home/pavel/operator-web"
@@ -36,10 +39,10 @@ updates = {
     "WEBRTC_AUDIO_PLAYBACK": "0",
     "AUDIO_RELAY_ENABLED": "1",
     "AUDIO_RELAY_DC": "0",
-    "AUDIO_RELAY_URL": "http://127.0.0.1:8888/api/audio-relay",
-    "AUDIO_RELAY_PUBLISH_URL": "http://127.0.0.1:8888/api/audio-relay/rooms/pi-camera/publish",
+    "AUDIO_RELAY_URL": "${VPS_AUDIO_BASE}",
+    "AUDIO_RELAY_PUBLISH_URL": "${VPS_PUBLISH_BASE}/rooms/pi-camera/publish",
     "AUDIO_TALK_ENABLED": "1",
-    "AUDIO_TALK_LISTEN_URL": "http://127.0.0.1:8888/api/audio-relay/rooms/pi-camera/talk-listen",
+    "AUDIO_TALK_LISTEN_URL": "${VPS_AUDIO_BASE}/rooms/pi-camera/talk-listen",
     "ICE_CONFIG_TOKEN": "$ICE_TOKEN",
 }
 seen = set()
@@ -150,7 +153,8 @@ sshpass -e ssh -o StrictHostKeyChecking=no "$HOST" \
 
 echo ""
 echo "Готово: дуплексный звук отдельно от WebRTC"
-echo "  Pi → браузер: /api/audio-relay/.../listen-ws"
-echo "  браузер → Pi: /api/audio-relay/.../talk-publish-ws"
+echo "  Pi → браузер: ${VPS_AUDIO_BASE}/.../listen-ws (через VPS)"
+echo "  браузер → Pi: ${VPS_AUDIO_BASE}/.../talk-publish-ws (через VPS)"
 echo "  WebRTC: только видео + управление"
-echo "  Оператор: http://100.73.9.95:8888/cam?autostart=1"
+echo "  Оператор: http://${VPS}/cam?autostart=1"
+echo "  Tailscale: http://100.73.9.95:8888/cam?autostart=1"

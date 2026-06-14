@@ -54,12 +54,16 @@ def _parse_listen_url(raw: str) -> tuple[str, int, str]:
 def run_once(listen_url: str, token: str, device: str) -> None:
     host, port, path = _parse_listen_url(listen_url)
     headers = {"Authorization": f"Bearer {token}"}
-    conn = http.client.HTTPConnection(host, port, timeout=30)
+    conn = http.client.HTTPConnection(host, port, timeout=3600)
     conn.request("GET", path, headers=headers)
     resp = conn.getresponse()
     if resp.status != 200:
         body = resp.read(256).decode(errors="replace")
         raise RuntimeError(f"talk-listen HTTP {resp.status}: {body[:120]}")
+    sock = getattr(getattr(resp, "fp", None), "raw", None)
+    sock = getattr(sock, "_sock", sock) if sock else None
+    if sock is not None:
+        sock.settimeout(3600)
 
     cmd = [
         "aplay",
@@ -80,33 +84,38 @@ def run_once(listen_url: str, token: str, device: str) -> None:
         "-q",
         "-",
     ]
-    log.info("aplay %s ← %s", device, listen_url)
-    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     total = 0
+    proc = None
+    stdin = None
     try:
-        stdin = proc.stdin
-        if not stdin:
-            raise RuntimeError("aplay stdin missing")
         while True:
             chunk = resp.read(CHUNK_BYTES)
             if not chunk:
                 break
+            if proc is None:
+                log.info("aplay %s ← %s (first chunk %d B)", device, listen_url, len(chunk))
+                proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+                stdin = proc.stdin
+                if not stdin:
+                    raise RuntimeError("aplay stdin missing")
             stdin.write(chunk)
             total += len(chunk)
     finally:
-        if proc.stdin:
+        if stdin:
             try:
-                proc.stdin.close()
+                stdin.close()
             except OSError:
                 pass
-        if proc.poll() is None:
+        if proc is not None and proc.poll() is None:
             proc.terminate()
             try:
                 proc.wait(timeout=2)
             except subprocess.TimeoutExpired:
                 proc.kill()
-        err = (proc.stderr.read() if proc.stderr else b"").decode(errors="replace").strip()
-        if err and proc.returncode not in (0, -15):
+        err = ""
+        if proc is not None and proc.stderr:
+            err = proc.stderr.read().decode(errors="replace").strip()
+        if err and proc is not None and proc.returncode not in (0, -15):
             log.warning("aplay stderr: %s", err[:300])
         conn.close()
         log.info("talk playback ended: %d bytes", total)

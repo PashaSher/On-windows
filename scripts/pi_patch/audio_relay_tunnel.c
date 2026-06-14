@@ -1,5 +1,6 @@
 /* ALSA capture → HTTP/1.1 chunked POST. cc -O2 -o audio_relay_tunnel audio_relay_tunnel.c -lasound */
 #include <alsa/asoundlib.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <signal.h>
@@ -77,6 +78,8 @@ static int connect_host(const char *host, int port) {
             continue;
         }
         if (connect(fd, rp->ai_addr, rp->ai_addrlen) == 0) {
+            int one = 1;
+            setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
             break;
         }
         close(fd);
@@ -212,13 +215,13 @@ int main(int argc, char **argv) {
         int sock = connect_host(u.host, u.port);
         if (sock < 0) {
             perror("connect");
-            sleep(2);
+            sleep(1);
             continue;
         }
         if (publish_stream(&u, argv[2], pcm, sock) != 0) {
             close(sock);
             if (!g_stop) {
-                sleep(2);
+                sleep(1);
             }
             continue;
         }

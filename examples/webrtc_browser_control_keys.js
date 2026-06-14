@@ -17,8 +17,16 @@ export function romeoDriveJson(dirUi) {
     return JSON.stringify({ action: "drive", dir });
 }
 
-export function romeoTurretSmoothJson(dir) {
-    return JSON.stringify({ action: "turret_smooth", dir: wireTurretDirForPi(dir) });
+export function romeoTurretSmoothJson(dir, rate) {
+    const payload = { action: "turret_smooth", dir: wireTurretDirForPi(dir) };
+    if (typeof rate === "number" && rate > 0) {
+        payload.v = rate;
+    }
+    return JSON.stringify(payload);
+}
+
+export function romeoTurretVelJson(pan, tilt) {
+    return JSON.stringify({ action: "turret_vel", pan, tilt });
 }
 
 export function romeoTurretStopJson() {

@@ -54,6 +54,17 @@
         }
         .telemetry-item.telemetry--low { color: #ef9a9a; }
         .telemetry-item.telemetry--offline { color: #ffab91; }
+        .btn-mic-talk {
+            background: transparent;
+            border: 1px solid #37474f;
+            border-radius: 6px;
+            padding: 2px 8px;
+            cursor: pointer;
+            font: inherit;
+        }
+        .btn-mic-talk.mic--ok { color: #81c784; border-color: #2e7d32; }
+        .btn-mic-talk.mic--pending { color: #ffcc80; }
+        .btn-mic-talk.mic--denied { color: #ffab91; }
         .telemetry-age {
             font-size: 0.68rem;
             color: #78909c;
@@ -301,6 +312,22 @@
             color: #78909c;
             text-align: center;
         }
+        .access-hint {
+            max-width: 520px;
+            margin: 8px auto 0;
+            padding: 8px 10px;
+            font-size: 0.72rem;
+            line-height: 1.35;
+            color: #b0bec5;
+            text-align: center;
+            background: rgba(15, 52, 96, 0.35);
+            border-radius: 8px;
+            border: 1px solid rgba(79, 195, 247, 0.15);
+        }
+        .access-hint a {
+            color: #4fc3f7;
+            word-break: break-all;
+        }
         @media (min-width: 901px) {
             .joystick { width: 130px; height: 130px; }
         }
@@ -319,6 +346,7 @@
         </div>
         <span class="telemetry-item" id="videoFps" title="Входящий FPS (WebRTC stats)">FPS: —</span>
         <span class="telemetry-item" id="piAudioStatus" title="Звук Pi — отдельный HTTP-поток (всегда при Connected)">🔊 —</span>
+        <button type="button" id="btnMicTalk" class="telemetry-item btn-mic-talk" title="Микрофон → динамик Pi (нажмите после Connect)">🎤 —</button>
         <span id="status">Disconnected</span>
     </header>
 
@@ -355,6 +383,11 @@
                     <button type="button" class="btn-msg btn-msg-send" id="btnRomeoMsgSend">Отправить</button>
                 </div>
                 <p class="romeo-msg-hint">Data Channel: {"romeo":"MSG текст"} → /dev/ttyACM0</p>
+                <div class="access-hint" id="accessHint">
+                    Если Cloudflare ошибка <strong>1033</strong> — Pi сменил Wi‑Fi, ссылка устарела.
+                    Стабильно: <a id="linkVpsCam" href="http://116.203.148.254/cam">116.203.148.254/cam</a>
+                    · Tailscale: <a href="http://100.73.9.95:8888/cam">100.73.9.95:8888/cam</a>
+                </div>
             </div>
         </div>
     </div>
@@ -444,8 +477,8 @@
             romeoTurretSmoothJson,
             romeoTurretStopJson,
             romeoHomeJson,
-        } from "./examples/webrtc_browser_control_keys.js";
-        import { mountVirtualJoystick } from "./examples/webrtc_touch_joysticks.js";
+        } from "./examples/webrtc_browser_control_keys.js?v=turret-analog-2";
+        import { mountVirtualJoystick } from "./examples/webrtc_touch_joysticks.js?v=turret-analog-2";
         import { updateHostTelemetryUi } from "./examples/webrtc_host_telemetry.js";
         async function loadOperatorBootstrap() {
             const qs = new URLSearchParams(window.location.search);
@@ -484,6 +517,24 @@
                     try {
                         localStorage.setItem("webrtc_ice_token", j.iceConfigToken);
                     } catch (_) {}
+                }
+                if (j.fallbackVpsCamUrl) {
+                    const a = document.getElementById("linkVpsCam");
+                    if (a) {
+                        a.href = j.fallbackVpsCamUrl;
+                        a.textContent = j.fallbackVpsCamUrl.replace(/^https?:\/\//, "");
+                    }
+                }
+                if (j.publicCamUrl) {
+                    const hint = document.getElementById("accessHint");
+                    if (hint && !hint.querySelector("#linkCfCam")) {
+                        const cf = document.createElement("a");
+                        cf.id = "linkCfCam";
+                        cf.href = j.publicCamUrl;
+                        cf.textContent = " Cloudflare";
+                        cf.style.marginLeft = "6px";
+                        hint.insertBefore(cf, hint.querySelector("#linkVpsCam"));
+                    }
                 }
             } catch (e) {
                 console.warn("loadOperatorBootstrap", e);
@@ -544,56 +595,24 @@
         const ENABLE_PC_MIC = false;
         let piAudioRelayGeneration = 0;
         let piAudioWs = null;
-        let piAudioCtx = null;
-        let piAudioWorklet = null;
+        let piAudioGainNode = null;
+        let piPcmRing = null;
+        let piPlaybackProcessor = null;
+        let piPlaybackPos = 0;
+        let piPlaybackPrefilled = false;
+        let piListenAbort = null;
         let pcMicRelayGeneration = 0;
         let pcMicWs = null;
-        let pcMicCtx = null;
         let pcMicStream = null;
-        let pcMicWorklet = null;
+        let pcMicProcessor = null;
+        let pcMicMuteGain = null;
         let pcMicSource = null;
+        let pcMicActive = false;
+        /** Один AudioContext на оба направления — resume() успевает в жесте Connect. */
+        let duplexAudioCtx = null;
         const PI_AUDIO_SAMPLE_RATE = 16000;
-        const PI_PCM_WORKLET_SRC = `
-class PiPcmPlayer extends AudioWorkletProcessor {
-    constructor() {
-        super();
-        this.queue = [];
-        this.cur = null;
-        this.pos = 0;
-        this.port.onmessage = (e) => {
-            if (e.data === "stop") {
-                this.queue.length = 0;
-                this.cur = null;
-                this.pos = 0;
-                return;
-            }
-            this.queue.push(new Int16Array(e.data));
-            while (this.queue.length > 4) {
-                this.queue.shift();
-            }
-        };
-    }
-    process(inputs, outputs) {
-        const out = outputs[0][0];
-        if (!out) {
-            return true;
-        }
-        for (let i = 0; i < out.length; i++) {
-            if (!this.cur || this.pos >= this.cur.length) {
-                this.cur = this.queue.shift() || null;
-                this.pos = 0;
-                if (!this.cur) {
-                    out[i] = 0;
-                    continue;
-                }
-            }
-            out[i] = this.cur[this.pos++] / 32768;
-        }
-        return true;
-    }
-}
-registerProcessor("pi-pcm-player", PiPcmPlayer);
-`;
+        const PI_PCM_PREFILL_SAMPLES = Math.ceil(PI_AUDIO_SAMPLE_RATE * 0.08);
+        const PI_PCM_MAX_SAMPLES = Math.ceil(PI_AUDIO_SAMPLE_RATE * 0.35);
         const PC_MIC_WORKLET_SRC = `
 class PcMicCapture extends AudioWorkletProcessor {
     constructor() {
@@ -1621,29 +1640,34 @@ registerProcessor("pc-mic-capture", PcMicCapture);
         }
 
         function setMicStatus(state, title) {
-            const el = document.getElementById("micStatus");
-            if (!el) {
+            const btn = document.getElementById("btnMicTalk");
+            if (!btn) {
                 return;
             }
+            btn.classList.remove("mic--ok", "mic--pending", "mic--denied");
             if (state === "ok") {
-                el.textContent = "🎤 вкл";
-                el.classList.remove("telemetry--offline", "telemetry--low");
+                btn.textContent = "🎤 вкл";
+                btn.classList.add("mic--ok");
             } else if (state === "denied" || state === "off") {
-                el.textContent = "🎤 выкл";
-                el.classList.add("telemetry--offline");
-            } else if (state === "pending") {
-                el.textContent = "🎤 …";
-                el.classList.remove("telemetry--offline");
-            } else if (state === "idle") {
-                el.textContent = "🎤 —";
-                el.classList.remove("telemetry--offline", "telemetry--low");
+                btn.textContent = "🎤 выкл";
+                btn.classList.add("mic--denied");
+            } else if (state === "pending" || state === "waiting") {
+                btn.textContent = "🎤 …";
+                btn.classList.add("mic--pending");
             } else {
-                el.textContent = "🎤 —";
-                el.classList.remove("telemetry--offline", "telemetry--low");
+                btn.textContent = "🎤 —";
             }
             if (title) {
-                el.title = title;
+                btn.title = title;
             }
+        }
+
+        function getRelayToken() {
+            const ui = getIceConfigFromUi().token;
+            if (ui) {
+                return ui;
+            }
+            return (window.__OPERATOR_BOOTSTRAP?.iceConfigToken || "").trim();
         }
 
         function getAudioRelayBase() {
@@ -1664,7 +1688,7 @@ registerProcessor("pc-mic-capture", PcMicCapture);
         }
 
         function getPiAudioListenUrl() {
-            const token = getIceConfigFromUi().token;
+            const token = getRelayToken();
             const base = getAudioRelayBase();
             const room = encodeURIComponent(getRoomId());
             let url = `${base}/rooms/${room}/listen`;
@@ -1674,8 +1698,197 @@ registerProcessor("pc-mic-capture", PcMicCapture);
             return url;
         }
 
+        function ensurePiAudioOutput(ctx) {
+            if (!piAudioGainNode || piAudioGainNode.context !== ctx) {
+                piAudioGainNode = ctx.createGain();
+                piAudioGainNode.gain.value = 1.0;
+                piAudioGainNode.connect(ctx.destination);
+            }
+            return piAudioGainNode;
+        }
+
+        function resetPiPlaybackQueue() {
+            piPcmRing = new Int16Array(0);
+            piPlaybackPos = 0;
+            piPlaybackPrefilled = false;
+        }
+
+        function ensurePiPlaybackPipeline(ctx) {
+            if (piPlaybackProcessor && piPlaybackProcessor.context === ctx) {
+                return;
+            }
+            if (piPlaybackProcessor) {
+                try {
+                    piPlaybackProcessor.onaudioprocess = null;
+                    piPlaybackProcessor.disconnect();
+                } catch (_) {}
+                piPlaybackProcessor = null;
+            }
+            resetPiPlaybackQueue();
+            piPlaybackProcessor = ctx.createScriptProcessor(2048, 0, 1);
+            const step = PI_AUDIO_SAMPLE_RATE / ctx.sampleRate;
+            piPlaybackProcessor.onaudioprocess = (ev) => {
+                const out = ev.outputBuffer.getChannelData(0);
+                const ring = piPcmRing;
+                if (!piPlaybackPrefilled || !ring || ring.length < 2) {
+                    out.fill(0);
+                    return;
+                }
+                let underrun = false;
+                for (let i = 0; i < out.length; i++) {
+                    const idx = piPlaybackPos | 0;
+                    if (idx + 1 >= ring.length) {
+                        underrun = true;
+                        for (let j = i; j < out.length; j++) {
+                            out[j] = 0;
+                        }
+                        break;
+                    }
+                    const frac = piPlaybackPos - idx;
+                    const s0 = ring[idx] / 32768;
+                    const s1 = ring[idx + 1] / 32768;
+                    out[i] = s0 + (s1 - s0) * frac;
+                    piPlaybackPos += step;
+                }
+                if (underrun) {
+                    piPlaybackPrefilled = false;
+                    piPlaybackPos = 0;
+                    return;
+                }
+                const consumed = piPlaybackPos | 0;
+                if (consumed > 0 && ring.length > consumed) {
+                    piPcmRing = ring.subarray(consumed);
+                    piPlaybackPos -= consumed;
+                } else if (consumed > 0 && ring.length <= consumed) {
+                    piPcmRing = new Int16Array(0);
+                    piPlaybackPos = 0;
+                    piPlaybackPrefilled = false;
+                }
+            };
+            piPlaybackProcessor.connect(ensurePiAudioOutput(ctx));
+        }
+
+        function enqueuePiPcm(bytes) {
+            const ctx = duplexAudioCtx;
+            if (!ctx || !bytes || bytes.length < 2) {
+                return;
+            }
+            ensurePiPlaybackPipeline(ctx);
+            const chunk = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength >> 1);
+            const ring = piPcmRing;
+            let merged = new Int16Array(ring.length + chunk.length);
+            merged.set(ring);
+            merged.set(chunk, ring.length);
+            if (merged.length > PI_PCM_MAX_SAMPLES) {
+                const drop = merged.length - PI_PCM_MAX_SAMPLES;
+                merged = merged.subarray(drop);
+                piPlaybackPos = Math.max(0, piPlaybackPos - drop);
+            }
+            piPcmRing = merged;
+            if (!piPlaybackPrefilled && piPcmRing.length >= PI_PCM_PREFILL_SAMPLES) {
+                piPlaybackPrefilled = true;
+                piPlaybackPos = 0;
+            }
+        }
+
+        function stopPiPlaybackPipeline() {
+            if (piPlaybackProcessor) {
+                try {
+                    piPlaybackProcessor.onaudioprocess = null;
+                    piPlaybackProcessor.disconnect();
+                } catch (_) {}
+                piPlaybackProcessor = null;
+            }
+            resetPiPlaybackQueue();
+        }
+
+        function playPiPcmFrame(bytes) {
+            enqueuePiPcm(bytes);
+        }
+
+        function primeDuplexAudioContext() {
+            if (!duplexAudioCtx || duplexAudioCtx.state === "closed") {
+                duplexAudioCtx = new AudioContext({ latencyHint: "interactive" });
+            }
+            if (duplexAudioCtx.state === "suspended") {
+                void duplexAudioCtx.resume();
+            }
+            return duplexAudioCtx;
+        }
+
+        function unlockDuplexAudio() {
+            const ctx = primeDuplexAudioContext();
+            if (ctx.state === "suspended") {
+                void ctx.resume();
+            }
+            try {
+                const buf = ctx.createBuffer(1, 1, ctx.sampleRate);
+                const src = ctx.createBufferSource();
+                src.buffer = buf;
+                src.connect(ctx.destination);
+                src.start(0);
+            } catch (_) {}
+        }
+
+        let mobileAudioUnlockInstalled = false;
+        function installMobileAudioUnlock() {
+            if (mobileAudioUnlockInstalled) {
+                return;
+            }
+            mobileAudioUnlockInstalled = true;
+            const unlock = () => {
+                unlockDuplexAudio();
+            };
+            document.addEventListener("pointerdown", unlock, true);
+            document.addEventListener("touchstart", unlock, { capture: true, passive: true });
+        }
+
+        async function ensureDuplexAudioContextRunning() {
+            const ctx = primeDuplexAudioContext();
+            if (ctx.state === "suspended") {
+                await ctx.resume();
+            }
+            return ctx;
+        }
+
+        function stopDuplexAudioContext() {
+            if (piAudioWs) {
+                try {
+                    piAudioWs.onopen = null;
+                    piAudioWs.onmessage = null;
+                    piAudioWs.onerror = null;
+                    piAudioWs.onclose = null;
+                    piAudioWs.close();
+                } catch (_) {}
+                piAudioWs = null;
+            }
+            stopPiPlaybackPipeline();
+            if (piAudioGainNode) {
+                try {
+                    piAudioGainNode.disconnect();
+                } catch (_) {}
+                piAudioGainNode = null;
+            }
+            if (pcMicSource) {
+                try {
+                    pcMicSource.disconnect();
+                } catch (_) {}
+                pcMicSource = null;
+            }
+            if (pcMicWorklet) {
+                try {
+                    pcMicWorklet.disconnect();
+                } catch (_) {}
+                pcMicWorklet = null;
+            }
+            if (duplexAudioCtx) {
+                duplexAudioCtx.close().catch(() => {});
+                duplexAudioCtx = null;
+            }
+        }
+
         function getPiAudioListenWsUrl() {
-            const token = getIceConfigFromUi().token;
+            const token = getRelayToken();
             const httpBase = getAudioRelayBase();
             const wsBase = httpBase.startsWith("https://")
                 ? "wss://" + httpBase.slice(8)
@@ -1693,7 +1906,7 @@ registerProcessor("pc-mic-capture", PcMicCapture);
         }
 
         function getTalkPublishWsUrl() {
-            const token = getIceConfigFromUi().token;
+            const token = getRelayToken();
             const httpBase = getAudioRelayBase();
             const wsBase = httpBase.startsWith("https://")
                 ? "wss://" + httpBase.slice(8)
@@ -1712,6 +1925,7 @@ registerProcessor("pc-mic-capture", PcMicCapture);
 
         function stopPcMicHttpRelay(resetStatus = true) {
             pcMicRelayGeneration += 1;
+            pcMicActive = false;
             if (pcMicWs) {
                 try {
                     pcMicWs.onopen = null;
@@ -1722,48 +1936,76 @@ registerProcessor("pc-mic-capture", PcMicCapture);
                 } catch (_) {}
                 pcMicWs = null;
             }
+            if (pcMicProcessor) {
+                try {
+                    pcMicProcessor.onaudioprocess = null;
+                    pcMicProcessor.disconnect();
+                } catch (_) {}
+                pcMicProcessor = null;
+            }
+            if (pcMicMuteGain) {
+                try {
+                    pcMicMuteGain.disconnect();
+                } catch (_) {}
+                pcMicMuteGain = null;
+            }
             if (pcMicSource) {
                 try {
                     pcMicSource.disconnect();
                 } catch (_) {}
                 pcMicSource = null;
             }
-            if (pcMicWorklet) {
-                try {
-                    pcMicWorklet.disconnect();
-                } catch (_) {}
-                pcMicWorklet = null;
-            }
             if (pcMicStream) {
                 pcMicStream.getTracks().forEach((t) => t.stop());
                 pcMicStream = null;
             }
-            if (pcMicCtx) {
-                pcMicCtx.close().catch(() => {});
-                pcMicCtx = null;
-            }
             if (resetStatus) {
-                setMicStatus("idle", "Микрофон ПК → Pi (HTTP relay)");
+                setMicStatus("idle", "Нажмите 🎤 — говорить в динамик Pi");
             }
         }
 
-        async function ensurePcMicWorklet(ctx) {
-            if (pcMicWorklet) {
-                return pcMicWorklet;
-            }
-            const blob = new Blob([PC_MIC_WORKLET_SRC], { type: "application/javascript" });
-            const url = URL.createObjectURL(blob);
-            try {
-                await ctx.audioWorklet.addModule(url);
-            } finally {
-                URL.revokeObjectURL(url);
-            }
-            pcMicWorklet = new AudioWorkletNode(ctx, "pc-mic-capture", {
-                numberOfInputs: 1,
-                numberOfOutputs: 0,
-                channelCount: 1,
-            });
-            return pcMicWorklet;
+        function wirePcMicDownsample(ctx, stream, ws, gen) {
+            pcMicSource = ctx.createMediaStreamSource(stream);
+            pcMicProcessor = ctx.createScriptProcessor(4096, 1, 1);
+            pcMicMuteGain = ctx.createGain();
+            pcMicMuteGain.gain.value = 0;
+            const step = ctx.sampleRate / PI_AUDIO_SAMPLE_RATE;
+            let acc = 0;
+            let pending = new Int16Array(0);
+            const frameSamples = PI_AUDIO_SAMPLE_RATE * 20 / 1000;
+            pcMicProcessor.onaudioprocess = (ev) => {
+                if (gen !== pcMicRelayGeneration || !pcMicWs || pcMicWs.readyState !== WebSocket.OPEN) {
+                    return;
+                }
+                const inp = ev.inputBuffer.getChannelData(0);
+                const out = [];
+                for (let i = 0; i < inp.length; i++) {
+                    acc += 1;
+                    if (acc >= step) {
+                        acc -= step;
+                        const s = Math.max(-1, Math.min(1, inp[i]));
+                        out.push(s < 0 ? s * 32768 : s * 32767);
+                    }
+                }
+                if (!out.length) {
+                    return;
+                }
+                const chunk = Int16Array.from(out);
+                const merged = new Int16Array(pending.length + chunk.length);
+                merged.set(pending);
+                merged.set(chunk, pending.length);
+                pending = merged;
+                while (pending.length >= frameSamples) {
+                    const frame = pending.slice(0, frameSamples);
+                    pending = pending.slice(frameSamples);
+                    try {
+                        pcMicWs.send(new Uint8Array(frame.buffer, frame.byteOffset, frame.byteLength));
+                    } catch (_) {}
+                }
+            };
+            pcMicSource.connect(pcMicProcessor);
+            pcMicProcessor.connect(pcMicMuteGain);
+            pcMicMuteGain.connect(ctx.destination);
         }
 
         async function startPcMicHttpRelay() {
@@ -1776,79 +2018,71 @@ registerProcessor("pc-mic-capture", PcMicCapture);
             const gen = pcMicRelayGeneration;
             const wsUrl = getTalkPublishWsUrl();
             setMicStatus("pending", "Микрофон → Pi…");
+            unlockDuplexAudio();
             try {
                 if (!navigator.mediaDevices?.getUserMedia) {
-                    throw new Error("getUserMedia недоступен (нужен HTTPS или localhost)");
+                    throw new Error("getUserMedia недоступен — откройте https://116.203.148.254/cam");
                 }
                 pcMicStream = await navigator.mediaDevices.getUserMedia({
                     audio: {
+                        deviceId: { ideal: "default" },
                         echoCancellation: true,
                         noiseSuppression: true,
                         autoGainControl: true,
                         channelCount: 1,
-                        sampleRate: PI_AUDIO_SAMPLE_RATE,
                     },
                     video: false,
                 });
-                pcMicCtx = new AudioContext({
-                    sampleRate: PI_AUDIO_SAMPLE_RATE,
-                    latencyHint: "interactive",
+                const ctx = await ensureDuplexAudioContextRunning();
+                const ws = new WebSocket(wsUrl);
+                ws.binaryType = "arraybuffer";
+                pcMicWs = ws;
+                let sent = false;
+                await new Promise((resolve, reject) => {
+                    ws.onopen = () => resolve();
+                    ws.onerror = () => reject(new Error("WebSocket talk-publish-ws"));
+                ws.onclose = () => {
+                    if (gen !== pcMicRelayGeneration) {
+                        return;
+                    }
+                    pcMicActive = false;
+                    setMicStatus("waiting", "WS закрыт — нажмите 🎤 снова");
+                };
                 });
-                await ensurePcMicWorklet(pcMicCtx);
-                if (pcMicCtx.state === "suspended") {
-                    await pcMicCtx.resume();
+                if (gen !== pcMicRelayGeneration) {
+                    return;
                 }
-                pcMicSource = pcMicCtx.createMediaStreamSource(pcMicStream);
-                pcMicSource.connect(pcMicWorklet);
+                wirePcMicDownsample(ctx, pcMicStream, ws, gen);
+                pcMicActive = true;
+                setMicStatus("ok", "Микрофон → динамик Pi");
+                log("Микрофон → Pi speaker (talk WS)", "success");
             } catch (e) {
                 setMicStatus("denied", e && e.message ? e.message : String(e));
-                log("PC mic relay: " + (e && e.message ? e.message : String(e)), "error");
+                log(
+                    "PC mic relay: " +
+                        (e && e.message ? e.message : String(e)) +
+                        " · на телефоне нужен HTTPS",
+                    "error",
+                );
+                stopPcMicHttpRelay(false);
+            }
+        }
+
+        function togglePcMicHttpRelay() {
+            if (pcMicActive) {
+                stopPcMicHttpRelay(true);
+                log("Микрофон → Pi выключен", "info");
                 return;
             }
-            const ws = new WebSocket(wsUrl);
-            ws.binaryType = "arraybuffer";
-            pcMicWs = ws;
-            let sent = false;
-            ws.onopen = () => {
-                if (gen !== pcMicRelayGeneration) {
-                    return;
-                }
-                log("PC mic WS open (→ Pi speaker)", "info");
-            };
-            ws.onerror = () => {
-                if (gen !== pcMicRelayGeneration) {
-                    return;
-                }
-                setMicStatus("waiting", "WS ошибка — переподключение…");
-            };
-            ws.onclose = () => {
-                if (gen !== pcMicRelayGeneration) {
-                    return;
-                }
-                setMicStatus("waiting", "WS закрыт — переподключение…");
-                setTimeout(() => {
-                    if (gen === pcMicRelayGeneration) {
-                        void startPcMicHttpRelay();
-                    }
-                }, 1500);
-            };
-            pcMicWorklet.port.onmessage = (ev) => {
-                if (gen !== pcMicRelayGeneration || !pcMicWs || pcMicWs.readyState !== WebSocket.OPEN) {
-                    return;
-                }
-                try {
-                    pcMicWs.send(ev.data);
-                    if (!sent) {
-                        sent = true;
-                        setMicStatus("ok", "Микрофон ПК → Pi (HTTP relay)");
-                        log("PC mic PCM stream sending", "success");
-                    }
-                } catch (_) {}
-            };
+            void startPcMicHttpRelay();
         }
 
         function stopPiAudioHttpRelay(resetStatus = true) {
             piAudioRelayGeneration += 1;
+            if (piListenAbort) {
+                piListenAbort.abort();
+                piListenAbort = null;
+            }
             if (piAudioWs) {
                 try {
                     piAudioWs.onopen = null;
@@ -1859,41 +2093,84 @@ registerProcessor("pc-mic-capture", PcMicCapture);
                 } catch (_) {}
                 piAudioWs = null;
             }
-            if (piAudioWorklet) {
-                try {
-                    piAudioWorklet.port.postMessage("stop");
-                    piAudioWorklet.disconnect();
-                } catch (_) {}
-                piAudioWorklet = null;
-            }
-            if (piAudioCtx) {
-                piAudioCtx.close().catch(() => {});
-                piAudioCtx = null;
-            }
+            stopPiPlaybackPipeline();
             window.__piAudioWsParts = 0;
             if (resetStatus) {
                 setPiAudioStatus("idle", "Звук Pi (C PCM tunnel)");
             }
         }
 
-        async function ensurePiAudioWorklet(ctx) {
-            if (piAudioWorklet) {
-                return piAudioWorklet;
+        async function startPiAudioHttpListenFetch(gen) {
+            const url = getPiAudioListenUrl();
+            const token = getRelayToken();
+            let played = false;
+            while (gen === piAudioRelayGeneration) {
+                setPiAudioStatus(played ? "ok" : "pending", played ? "Звук Pi" : "Подключение звука Pi…");
+                resetPiPlaybackQueue();
+                if (piListenAbort) {
+                    piListenAbort.abort();
+                }
+                piListenAbort = new AbortController();
+                const { signal } = piListenAbort;
+                try {
+                    await ensureDuplexAudioContextRunning();
+                    ensurePiPlaybackPipeline(duplexAudioCtx);
+                } catch (e) {
+                    setPiAudioStatus("waiting", "AudioContext недоступен");
+                    return;
+                }
+                const headers = {};
+                if (token) {
+                    headers.Authorization = `Bearer ${token}`;
+                }
+                try {
+                    const resp = await fetch(url, { headers, cache: "no-store", signal });
+                    if (!resp.ok || !resp.body) {
+                        throw new Error("HTTP " + resp.status);
+                    }
+                    const reader = resp.body.getReader();
+                    let pending = new Uint8Array(0);
+                    while (gen === piAudioRelayGeneration) {
+                        const { done, value } = await reader.read();
+                        if (done) {
+                            break;
+                        }
+                        if (!value || !value.length) {
+                            continue;
+                        }
+                        const merged = new Uint8Array(pending.length + value.length);
+                        merged.set(pending);
+                        merged.set(value, pending.length);
+                        pending = merged;
+                        while (pending.length >= 640 && gen === piAudioRelayGeneration) {
+                            unlockDuplexAudio();
+                            playPiPcmFrame(pending.subarray(0, 640));
+                            pending = pending.subarray(640);
+                            if (!played) {
+                                played = true;
+                                setPiAudioStatus("ok", "Звук Pi");
+                                log("Pi audio playing (HTTP listen)", "success");
+                            }
+                        }
+                    }
+                    try {
+                        await reader.cancel();
+                    } catch (_) {}
+                } catch (e) {
+                    if (gen !== piAudioRelayGeneration || signal.aborted) {
+                        return;
+                    }
+                    if (e && e.name === "AbortError") {
+                        continue;
+                    }
+                    log("Pi audio: " + (e && e.message ? e.message : String(e)), "warn");
+                }
+                if (gen !== piAudioRelayGeneration) {
+                    return;
+                }
+                setPiAudioStatus("waiting", "переподключение звука Pi…");
+                await new Promise((r) => setTimeout(r, 300));
             }
-            const blob = new Blob([PI_PCM_WORKLET_SRC], { type: "application/javascript" });
-            const url = URL.createObjectURL(blob);
-            try {
-                await ctx.audioWorklet.addModule(url);
-            } finally {
-                URL.revokeObjectURL(url);
-            }
-            piAudioWorklet = new AudioWorkletNode(ctx, "pi-pcm-player", {
-                numberOfInputs: 0,
-                numberOfOutputs: 1,
-                outputChannelCount: [1],
-            });
-            piAudioWorklet.connect(ctx.destination);
-            return piAudioWorklet;
         }
 
         async function startPiAudioHttpRelay() {
@@ -1904,59 +2181,16 @@ registerProcessor("pc-mic-capture", PcMicCapture);
             stopPiAudioHttpRelay(false);
             piAudioRelayGeneration += 1;
             const gen = piAudioRelayGeneration;
-            const wsUrl = getPiAudioListenWsUrl();
-            setPiAudioStatus("pending", "C PCM WebSocket…");
-            let played = false;
+            resetPiPlaybackQueue();
+            unlockDuplexAudio();
             try {
-                piAudioCtx = new AudioContext({ sampleRate: PI_AUDIO_SAMPLE_RATE, latencyHint: "interactive" });
-                await ensurePiAudioWorklet(piAudioCtx);
-                if (piAudioCtx.state === "suspended") {
-                    await piAudioCtx.resume();
-                }
+                await ensureDuplexAudioContextRunning();
             } catch (e) {
-                log("Pi audio worklet: " + (e && e.message ? e.message : String(e)), "error");
-                setPiAudioStatus("waiting", "AudioWorklet недоступен");
+                log("Pi audio ctx: " + (e && e.message ? e.message : String(e)), "error");
+                setPiAudioStatus("waiting", "AudioContext недоступен");
                 return;
             }
-            const ws = new WebSocket(wsUrl);
-            ws.binaryType = "arraybuffer";
-            piAudioWs = ws;
-            ws.onopen = () => {
-                if (gen !== piAudioRelayGeneration) {
-                    return;
-                }
-                log("Pi audio WS open (C PCM tunnel)", "info");
-            };
-            ws.onmessage = (ev) => {
-                if (gen !== piAudioRelayGeneration || !piAudioWorklet) {
-                    return;
-                }
-                window.__piAudioWsParts = (window.__piAudioWsParts || 0) + 1;
-                piAudioWorklet.port.postMessage(ev.data, [ev.data]);
-                if (!played) {
-                    played = true;
-                    setPiAudioStatus("ok", "Звук Pi (C PCM, ~20 ms)");
-                    log("Pi audio PCM stream playing", "success");
-                }
-            };
-            ws.onerror = () => {
-                if (gen !== piAudioRelayGeneration) {
-                    return;
-                }
-                setPiAudioStatus("waiting", "WS ошибка — переподключение…");
-                log("Pi audio WebSocket error — retry", "warn");
-            };
-            ws.onclose = () => {
-                if (gen !== piAudioRelayGeneration) {
-                    return;
-                }
-                setPiAudioStatus("waiting", "WS закрыт — переподключение…");
-                setTimeout(() => {
-                    if (gen === piAudioRelayGeneration) {
-                        void startPiAudioHttpRelay();
-                    }
-                }, 1500);
-            };
+            void startPiAudioHttpListenFetch(gen);
         }
 
         function setPiAudioStatus(state, title) {
@@ -2146,6 +2380,9 @@ registerProcessor("pc-mic-capture", PcMicCapture);
             log("Starting WebRTC connection...");
             setStatus("Connecting...", "connecting");
             document.getElementById("btnConnect").disabled = true;
+            unlockDuplexAudio();
+            installMobileAudioUnlock();
+            primeDuplexAudioContext();
             if (USE_PI_AUDIO_HTTP_RELAY) {
                 void startPiAudioHttpRelay();
             }
@@ -2479,6 +2716,7 @@ registerProcessor("pc-mic-capture", PcMicCapture);
             audioTransceiver = null;
             stopPiAudioHttpRelay();
             stopPcMicHttpRelay();
+            stopDuplexAudioContext();
             connectInProgress = false;
 
             document.getElementById("remoteVideo").srcObject = null;
@@ -2509,30 +2747,62 @@ registerProcessor("pc-mic-capture", PcMicCapture);
             sendDc(romeoDriveJson(direction), { quiet: true });
         }
 
+        /** Макс. скорость башни с телефона (град/с); Pi масштабирует через ROMEO_TURRET_VEL_SCALE. */
+        const TURRET_JOY_MAX_VEL = 10;
+
         function sendTurretDir(dir) {
             if (dir) {
-                sendDc(romeoTurretSmoothJson(dir), { quiet: true });
+                sendDc(romeoTurretSmoothJson(dir, 8), { quiet: true });
             } else {
                 sendDc(romeoTurretStopJson(), { quiet: true });
             }
         }
 
+        function sendTurretVec(nx, ny, mag) {
+            if (!mag || mag <= 0) {
+                sendDc(romeoTurretStopJson(), { quiet: true });
+                return;
+            }
+            // LR swap как ROME_TURRET_LR_SWAP=true в webrtc_browser_control_keys.js
+            let pan = -nx * TURRET_JOY_MAX_VEL;
+            const tilt = -ny * TURRET_JOY_MAX_VEL;
+            sendDc(JSON.stringify({ action: "turret_vel", pan, tilt }), { quiet: true });
+        }
+
         detachControlKeys = attachBrowserControlKeys((cmd) => sendDc(cmd, { quiet: true }));
 
-        mountVirtualJoystick(document.getElementById("joyDrive"), {
-            mode: "drive",
-            deadzone: 0.32,
-            onDir(dir) {
-                sendCmd(dir || "stop");
-            },
-        });
-        mountVirtualJoystick(document.getElementById("joyTurret"), {
-            mode: "turret",
-            deadzone: 0.32,
-            onDir(dir) {
-                sendTurretDir(dir);
-            },
-        });
+        const joyDriveEl = document.getElementById("joyDrive");
+        const joyTurretEl = document.getElementById("joyTurret");
+        if (joyDriveEl) {
+            mountVirtualJoystick(joyDriveEl, {
+                mode: "drive",
+                deadzone: 0.32,
+                analog: false,
+                onDir(dir) {
+                    unlockDuplexAudio();
+                    sendCmd(dir || "stop");
+                },
+            });
+        } else {
+            log("joyDrive element missing", "error");
+        }
+        if (joyTurretEl) {
+            mountVirtualJoystick(joyTurretEl, {
+                mode: "turret",
+                deadzone: 0.2,
+                analog: true,
+                onDir(dir) {
+                    unlockDuplexAudio();
+                    sendTurretDir(dir);
+                },
+                onVec(nx, ny, mag) {
+                    unlockDuplexAudio();
+                    sendTurretVec(nx, ny, mag);
+                },
+            });
+        } else {
+            log("joyTurret element missing", "error");
+        }
 
         document.getElementById("btnHome")?.addEventListener("click", () => sendDc(romeoHomeJson()));
 
@@ -2566,7 +2836,7 @@ registerProcessor("pc-mic-capture", PcMicCapture);
             window.__webrtcMarkReady();
         }
         log(`VPS room: ${getRoomPath()} · signaling ${signalApiBase}`, "info");
-        log("Operator build: 2026-06-14 (duplex-http-audio)", "success");
+        log("Operator build: 2026-06-14 (duplex-audio-fix-v14)", "success");
         if (FORCE_TCP_TURN) {
             log("ICE: TURN через TCP 3478 (udpTurn=1 — вернуть UDP relay)", "info");
         }
@@ -2594,6 +2864,11 @@ registerProcessor("pc-mic-capture", PcMicCapture);
                 log("Нет ICE token — на VPS: /etc/default/operator-bootstrap.json", "error");
             }
         }
+
+        document.getElementById("btnMicTalk")?.addEventListener("click", () => {
+            unlockDuplexAudio();
+            togglePcMicHttpRelay();
+        });
 
         document.getElementById("btnConnect")?.addEventListener("click", () => {
             void startConnection();

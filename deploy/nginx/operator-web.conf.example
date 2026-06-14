@@ -25,13 +25,36 @@ server {
         proxy_pass http://127.0.0.1:8788/api/audio-relay/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
         proxy_buffering off;
         proxy_request_buffering off;
+        client_body_timeout 3600s;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
         add_header Access-Control-Allow-Origin * always;
         add_header Access-Control-Allow-Methods "GET, POST, OPTIONS" always;
         add_header Access-Control-Allow-Headers "Authorization, Content-Type" always;
+    }
+
+    location /api/operator-static/ {
+        proxy_pass http://127.0.0.1:8788/api/operator-static/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+        client_max_body_size 20m;
+        add_header Access-Control-Allow-Origin * always;
+        add_header Access-Control-Allow-Methods "GET, PUT, OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Authorization, Content-Type" always;
+    }
+
+    location = /webrtc-client.html {
+        proxy_pass http://127.0.0.1:8788/webrtc-client.html;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        add_header Cache-Control "no-store" always;
+        add_header Access-Control-Allow-Origin * always;
     }
 
     location /api/signal/ {
@@ -92,13 +115,36 @@ server {
         proxy_pass http://127.0.0.1:8788/api/audio-relay/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
         proxy_buffering off;
         proxy_request_buffering off;
+        client_body_timeout 3600s;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
         add_header Access-Control-Allow-Origin * always;
         add_header Access-Control-Allow-Methods "GET, POST, OPTIONS" always;
         add_header Access-Control-Allow-Headers "Authorization, Content-Type" always;
+    }
+
+    location /api/operator-static/ {
+        proxy_pass http://127.0.0.1:8788/api/operator-static/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+        client_max_body_size 20m;
+        add_header Access-Control-Allow-Origin * always;
+        add_header Access-Control-Allow-Methods "GET, PUT, OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Authorization, Content-Type" always;
+    }
+
+    location = /webrtc-client.html {
+        proxy_pass http://127.0.0.1:8788/webrtc-client.html;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        add_header Cache-Control "no-store" always;
+        add_header Access-Control-Allow-Origin * always;
     }
 
     location /api/signal/ {

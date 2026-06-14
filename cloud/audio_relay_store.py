@@ -39,17 +39,18 @@ class AudioRelayStore:
             if not lst:
                 self._listeners.pop(room, None)
 
-    def mark_publisher(self, room: str, active: bool) -> None:
+    def mark_publisher(self, room: str, active: bool, *, end_listeners: bool = False) -> None:
         with self._lock:
             if active:
                 self._publishers[room] = time.monotonic()
             else:
                 self._publishers.pop(room, None)
-                for q in self._listeners.get(room, []):
-                    try:
-                        q.put_nowait(None)
-                    except queue.Full:
-                        pass
+                if end_listeners:
+                    for q in self._listeners.get(room, []):
+                        try:
+                            q.put_nowait(None)
+                        except queue.Full:
+                            pass
 
     def publisher_active(self, room: str) -> bool:
         with self._lock:

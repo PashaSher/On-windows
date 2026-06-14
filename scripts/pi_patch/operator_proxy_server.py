@@ -443,6 +443,13 @@ class OperatorProxyHandler(http.server.SimpleHTTPRequestHandler):
     def _handle_operator_bootstrap(self) -> None:
         token = os.environ.get("ICE_CONFIG_TOKEN", "").strip()
         room = os.environ.get("WEBRTC_ROOM", "pi-camera").strip() or "pi-camera"
+        public_cam = ""
+        url_file = os.environ.get("OPERATOR_PUBLIC_URL_FILE", "/home/pavel/operator-web/public-url.txt")
+        try:
+            if os.path.isfile(url_file):
+                public_cam = Path(url_file).read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
         self._send_json(
             200,
             {
@@ -452,12 +459,34 @@ class OperatorProxyHandler(http.server.SimpleHTTPRequestHandler):
                 "signalApiBase": "/api/signal",
                 "audioRelayBase": "/api/audio-relay",
                 "signaling": "vps",
+                "fallbackVpsCamUrl": "http://116.203.148.254/cam",
+                "publicCamUrl": public_cam,
+            },
+        )
+
+    def _handle_public_url(self) -> None:
+        url_file = os.environ.get("OPERATOR_PUBLIC_URL_FILE", "/home/pavel/operator-web/public-url.txt")
+        public_cam = ""
+        try:
+            if os.path.isfile(url_file):
+                public_cam = Path(url_file).read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
+        self._send_json(
+            200,
+            {
+                "publicCamUrl": public_cam,
+                "fallbackVpsCamUrl": "http://116.203.148.254/cam",
+                "tailscaleCamUrl": "http://100.73.9.95:8888/cam",
             },
         )
 
     def do_GET(self) -> None:
         if urlparse(self.path).path == "/api/operator-bootstrap":
             self._handle_operator_bootstrap()
+            return
+        if urlparse(self.path).path == "/api/public-url":
+            self._handle_public_url()
             return
         if self._dispatch_audio_relay("GET"):
             return

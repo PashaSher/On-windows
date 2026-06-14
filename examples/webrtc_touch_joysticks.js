@@ -5,7 +5,10 @@
  */
 export function mountVirtualJoystick(root, opts) {
     const { mode, onDir } = opts;
-    const deadzone = opts.deadzone ?? 0.22;
+    const onVec = typeof opts.onVec === "function" ? opts.onVec : null;
+    const analog = opts.analog ?? mode === "turret";
+    const deadzone = opts.deadzone ?? (mode === "turret" ? 0.18 : 0.22);
+    const moveIntervalMs = opts.moveIntervalMs ?? (mode === "turret" && analog ? 80 : 55);
     root.classList.add("joystick", `joystick--${mode}`);
     root.innerHTML = "";
     const ring = document.createElement("div");
@@ -50,13 +53,24 @@ export function mountVirtualJoystick(root, opts) {
     }
 
     let emitTimer = null;
+    let lastVecKey = "";
     function emit(dir) {
         const d = dir || null;
+        if (analog && onVec && mode === "turret") {
+            return;
+        }
         if (d === lastDir) {
             return;
         }
         if (emitTimer) {
             clearTimeout(emitTimer);
+            emitTimer = null;
+        }
+        // stop/center — сразу, без debounce (важно для отпускания на телефоне)
+        if (d === null) {
+            lastDir = null;
+            onDir(null);
+            return;
         }
         emitTimer = setTimeout(() => {
             emitTimer = null;
@@ -65,27 +79,76 @@ export function mountVirtualJoystick(root, opts) {
             }
             lastDir = d;
             onDir(d);
-        }, 55);
+        }, moveIntervalMs);
+    }
+
+    let vecTimer = null;
+    function emitVec(nx, ny, mag) {
+        if (!onVec) {
+            return;
+        }
+        const key = `${nx.toFixed(2)}:${ny.toFixed(2)}`;
+        if (mag < deadzone) {
+            if (lastVecKey !== "") {
+                lastVecKey = "";
+                onVec(0, 0, 0);
+            }
+            return;
+        }
+        if (key === lastVecKey) {
+            return;
+        }
+        if (vecTimer) {
+            clearTimeout(vecTimer);
+        }
+        vecTimer = setTimeout(() => {
+            vecTimer = null;
+            lastVecKey = key;
+            onVec(nx, ny, mag);
+        }, moveIntervalMs);
     }
 
     function moveKnob(clientX, clientY) {
         const { cx, cy, radius } = center();
         let dx = clientX - cx;
         let dy = clientY - cy;
-        const mag = Math.hypot(dx, dy);
-        if (mag > radius && mag > 0) {
-            dx = (dx / mag) * radius;
-            dy = (dy / mag) * radius;
+        const pixMag = Math.hypot(dx, dy);
+        if (pixMag > radius && pixMag > 0) {
+            dx = (dx / pixMag) * radius;
+            dy = (dy / pixMag) * radius;
         }
         knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
         const nx = dx / radius;
         const ny = dy / radius;
+        const normMag = Math.hypot(nx, ny);
+        if (analog && onVec && mode === "turret") {
+            emitVec(nx, ny, normMag);
+            return;
+        }
         emit(vecToDir(nx, ny));
     }
 
     function resetKnob() {
         knob.style.transform = "translate(-50%, -50%)";
-        emit(null);
+        if (emitTimer) {
+            clearTimeout(emitTimer);
+            emitTimer = null;
+        }
+        if (vecTimer) {
+            clearTimeout(vecTimer);
+            vecTimer = null;
+        }
+        if (analog && onVec && mode === "turret") {
+            if (lastVecKey !== "") {
+                lastVecKey = "";
+                onVec(0, 0, 0);
+            }
+            return;
+        }
+        if (lastDir !== null) {
+            lastDir = null;
+            onDir(null);
+        }
     }
 
     function onPointerDown(e) {
@@ -123,12 +186,14 @@ export function mountVirtualJoystick(root, opts) {
     root.addEventListener("pointermove", onPointerMove);
     root.addEventListener("pointerup", onPointerUp);
     root.addEventListener("pointercancel", onPointerUp);
+    root.addEventListener("lostpointercapture", onPointerUp);
 
     return () => {
         root.removeEventListener("pointerdown", onPointerDown);
         root.removeEventListener("pointermove", onPointerMove);
         root.removeEventListener("pointerup", onPointerUp);
         root.removeEventListener("pointercancel", onPointerUp);
+        root.removeEventListener("lostpointercapture", onPointerUp);
         resetKnob();
     };
 }
