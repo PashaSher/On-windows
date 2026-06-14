@@ -1,8 +1,9 @@
 /**
- * Trickle ICE через VPS signaling API.
+ * Trickle ICE через Firebase RTDB (caller ↔ callee).
+ * Подключать ДО createOffer / setLocalDescription.
  */
 
-import { signalPostCallerCandidate, signalPostCalleeCandidate } from "./webrtc_vps_signaling.js";
+import { get, push, onChildAdded, roomChildRef } from "./webrtc_firebase_rtdb.js";
 
 function parseCandidateTyp(line) {
     const m = String(line || "").match(/\btyp\s+(\w+)/i);
@@ -10,23 +11,20 @@ function parseCandidateTyp(line) {
 }
 
 /**
- * @param {string} apiBase
+ * @param {import('firebase/database').Database} db
  * @param {string} roomIdOrPath
  * @param {RTCPeerConnection} pc
  * @param {'caller'|'callee'} role
  */
-export function attachVpsIceTrickle(apiBase, roomIdOrPath, pc, role, hooks = {}) {
+export function attachFirebaseIceTrickle(db, roomIdOrPath, pc, role, hooks = {}) {
     const remoteRelayOnly = !!hooks.remoteRelayOnly;
-    const localTcpRelayOnly = !!hooks.localTcpRelayOnly;
-    const iceToken = hooks.iceToken || "";
+
     const isCaller = role === "caller";
-    const postRemote = isCaller ? signalPostCallerCandidate : signalPostCalleeCandidate;
+    const localKey = isCaller ? "callerCandidates" : "calleeCandidates";
     const remoteKey = isCaller ? "calleeCandidates" : "callerCandidates";
 
     const pending = [];
-    const pendingUdpRelay = [];
     const appliedKeys = new Set();
-    let tcpRelayPosted = false;
     let prevOnIceCandidate = pc.onicecandidate;
 
     function rawKey(raw) {
@@ -43,26 +41,8 @@ export function attachVpsIceTrickle(apiBase, roomIdOrPath, pc, role, hooks = {})
         if (!event.candidate) {
             return;
         }
-        const line = event.candidate.candidate || "";
-        const isUdpRelay =
-            localTcpRelayOnly && /\btyp relay\b/i.test(line) && /\s1\s+udp\s+/i.test(line);
-        const isTcpRelay =
-            localTcpRelayOnly && /\btyp relay\b/i.test(line) && /\s1\s+tcp\s+/i.test(line);
-        if (isUdpRelay && !tcpRelayPosted) {
-            pendingUdpRelay.push(event.candidate);
-            hooks.onLocalCandidate?.(event.candidate, null, { skipped: true, reason: "udp-relay-queued" });
-            return;
-        }
-        if (isUdpRelay) {
-            hooks.onLocalCandidate?.(event.candidate, null, { skipped: true, reason: "udp-relay" });
-            return;
-        }
         const raw = event.candidate.toJSON();
-        const post = isCaller ? signalPostCallerCandidate : signalPostCalleeCandidate;
-        void post(apiBase, roomIdOrPath, raw, iceToken).catch((e) => hooks.onError?.(e));
-        if (isTcpRelay) {
-            tcpRelayPosted = true;
-        }
+        push(roomChildRef(db, roomIdOrPath, localKey), raw);
         hooks.onLocalCandidate?.(event.candidate, raw);
     };
 
@@ -106,41 +86,33 @@ export function attachVpsIceTrickle(apiBase, roomIdOrPath, pc, role, hooks = {})
         return n;
     }
 
-    function applySnapshotCandidates(snapshot) {
-        const bag = snapshot?.[remoteKey];
-        if (!bag || typeof bag !== "object") {
-            return Promise.resolve(0);
-        }
-        let chain = Promise.resolve(0);
-        for (const raw of Object.values(bag)) {
-            chain = chain.then(async (n) => n + (await applyRemote(raw) ? 1 : 0));
-        }
-        return chain;
-    }
-
-    async function flushUdpRelayFallback() {
-        if (!localTcpRelayOnly || tcpRelayPosted || pendingUdpRelay.length === 0) {
+    /** Все callee/caller ICE уже в Firebase (onChildAdded мог опоздать). */
+    async function syncRemoteFromFirebase() {
+        const snap = await get(roomChildRef(db, roomIdOrPath, remoteKey));
+        const val = snap.val();
+        if (!val || typeof val !== "object") {
             return 0;
         }
-        const post = isCaller ? signalPostCallerCandidate : signalPostCalleeCandidate;
         let n = 0;
-        for (const cand of pendingUdpRelay) {
-            const raw = cand.toJSON();
-            await post(apiBase, roomIdOrPath, raw, iceToken).catch((e) => hooks.onError?.(e));
-            hooks.onLocalCandidate?.(cand, raw, { fallback: true, reason: "udp-relay-fallback" });
-            n += 1;
+        for (const k of Object.keys(val)) {
+            if (await applyRemote(val[k])) {
+                n += 1;
+            }
         }
-        pendingUdpRelay.length = 0;
         return n;
     }
 
+    const unsubscribeRemote = onChildAdded(roomChildRef(db, roomIdOrPath, remoteKey), (snapshot) => {
+        void applyRemote(snapshot.val());
+    });
+
     return {
         detach() {
+            unsubscribeRemote();
             pc.onicecandidate = prevOnIceCandidate;
         },
         flushPending,
-        flushUdpRelayFallback,
-        applySnapshotCandidates,
+        syncRemoteFromFirebase,
         notifyRemoteDescriptionSet: flushPending,
     };
 }

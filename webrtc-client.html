@@ -236,6 +236,21 @@
             color: #fff;
             font-size: 0.85rem;
         }
+        .btn-listen-round {
+            background: #37474f;
+            color: #fff;
+            font-size: 1.2rem;
+            touch-action: none;
+            user-select: none;
+        }
+        .btn-listen-round.btn-listen--active {
+            background: #2e7d32;
+            box-shadow: 0 0 0 3px rgba(129, 199, 132, 0.45);
+        }
+        .video-container.video-listen-mode #remoteVideo {
+            opacity: 0.35;
+            filter: grayscale(0.25);
+        }
         .romeo-msg-row {
             display: flex;
             gap: 8px;
@@ -303,6 +318,7 @@
             <span class="telemetry-age" id="telemetryAge"></span>
         </div>
         <span class="telemetry-item" id="videoFps" title="Входящий FPS (WebRTC stats)">FPS: —</span>
+        <span class="telemetry-item" id="piAudioStatus" title="Звук Pi — отдельный HTTP-поток (всегда при Connected)">🔊 —</span>
         <span id="status">Disconnected</span>
     </header>
 
@@ -316,6 +332,7 @@
         <div class="stage">
             <div class="video-container">
                 <video id="remoteVideo" autoplay playsinline muted></video>
+                <audio id="remoteAudio" autoplay></audio>
             </div>
 
             <div class="control-dock" id="controlDock">
@@ -517,8 +534,93 @@
             _qsTurn.has("tcpTurn") ||
             _qsTurn.get("turn") === "tcp" ||
             (USE_RELAY_ONLY && !_qsTurn.has("udpTurn"));
-        /** Микрофон ПК → Pi: выключен, пока не нужен (только приём звука с Pi). */
+        /** Звук Pi: C ALSA PCM → WS → AudioWorklet (не трогает WebRTC). */
+        const USE_PI_AUDIO_HTTP_RELAY = new URLSearchParams(window.location.search).get("audio") !== "0";
+        /** Микрофон ПК → Pi: отдельный HTTP relay (не WebRTC m=audio). */
+        const USE_PC_MIC_HTTP_RELAY =
+            USE_PI_AUDIO_HTTP_RELAY &&
+            new URLSearchParams(window.location.search).get("mic") !== "0";
+        /** WebRTC m=audio выключен — только HTTP relay. */
         const ENABLE_PC_MIC = false;
+        let piAudioRelayGeneration = 0;
+        let piAudioWs = null;
+        let piAudioCtx = null;
+        let piAudioWorklet = null;
+        let pcMicRelayGeneration = 0;
+        let pcMicWs = null;
+        let pcMicCtx = null;
+        let pcMicStream = null;
+        let pcMicWorklet = null;
+        let pcMicSource = null;
+        const PI_AUDIO_SAMPLE_RATE = 16000;
+        const PI_PCM_WORKLET_SRC = `
+class PiPcmPlayer extends AudioWorkletProcessor {
+    constructor() {
+        super();
+        this.queue = [];
+        this.cur = null;
+        this.pos = 0;
+        this.port.onmessage = (e) => {
+            if (e.data === "stop") {
+                this.queue.length = 0;
+                this.cur = null;
+                this.pos = 0;
+                return;
+            }
+            this.queue.push(new Int16Array(e.data));
+            while (this.queue.length > 4) {
+                this.queue.shift();
+            }
+        };
+    }
+    process(inputs, outputs) {
+        const out = outputs[0][0];
+        if (!out) {
+            return true;
+        }
+        for (let i = 0; i < out.length; i++) {
+            if (!this.cur || this.pos >= this.cur.length) {
+                this.cur = this.queue.shift() || null;
+                this.pos = 0;
+                if (!this.cur) {
+                    out[i] = 0;
+                    continue;
+                }
+            }
+            out[i] = this.cur[this.pos++] / 32768;
+        }
+        return true;
+    }
+}
+registerProcessor("pi-pcm-player", PiPcmPlayer);
+`;
+        const PC_MIC_WORKLET_SRC = `
+class PcMicCapture extends AudioWorkletProcessor {
+    constructor() {
+        super();
+        this.buf = new Int16Array(320);
+        this.pos = 0;
+    }
+    process(inputs) {
+        const inp = inputs[0] && inputs[0][0];
+        if (!inp) {
+            return true;
+        }
+        for (let i = 0; i < inp.length; i++) {
+            const s = Math.max(-1, Math.min(1, inp[i]));
+            this.buf[this.pos++] = s < 0 ? s * 32768 : s * 32767;
+            if (this.pos >= 320) {
+                const out = this.buf.slice(0);
+                this.port.postMessage(out.buffer, [out.buffer]);
+                this.buf = new Int16Array(320);
+                this.pos = 0;
+            }
+        }
+        return true;
+    }
+}
+registerProcessor("pc-mic-capture", PcMicCapture);
+`;
         let lastSignalingRoomPath = null;
 
         function applyHetznerDebugUi() {
@@ -1026,7 +1128,7 @@
 
         let _lastDcSent = "";
         let _lastDcAt = 0;
-        const DC_QUIET_MIN_MS = 45;
+        const DC_QUIET_MIN_MS = 16;
 
         function sendDc(cmd, opts = {}) {
             if (dataChannel && dataChannel.readyState === "open") {
@@ -1191,7 +1293,7 @@
                         if (fps != null && Number.isFinite(fps) && fps > 0) {
                             updateVideoFpsUi(fps);
                         }
-                        if (statsTick === 1 || statsTick % 3 === 0) {
+                        if (statsTick === 1 || statsTick % 8 === 0) {
                             const ice = pc.iceConnectionState;
                             const cs = pc.connectionState;
                             const ap = inboundA?.packetsReceived ?? 0;
@@ -1544,6 +1646,319 @@
             }
         }
 
+        function getAudioRelayBase() {
+            const b = window.__OPERATOR_BOOTSTRAP?.audioRelayBase;
+            if (typeof b === "string" && b.startsWith("http")) {
+                return b.replace(/\/$/, "");
+            }
+            if (typeof b === "string" && b.startsWith("/")) {
+                return window.location.origin.replace(/\/$/, "") + b.replace(/\/$/, "");
+            }
+            return window.location.origin.replace(/\/$/, "") + "/api/audio-relay";
+        }
+
+        function getRoomId() {
+            const rp = getRoomPath();
+            const m = rp.match(/rooms\/([^/]+)/);
+            return m ? m[1] : "pi-camera";
+        }
+
+        function getPiAudioListenUrl() {
+            const token = getIceConfigFromUi().token;
+            const base = getAudioRelayBase();
+            const room = encodeURIComponent(getRoomId());
+            let url = `${base}/rooms/${room}/listen`;
+            if (token) {
+                url += `?token=${encodeURIComponent(token)}`;
+            }
+            return url;
+        }
+
+        function getPiAudioListenWsUrl() {
+            const token = getIceConfigFromUi().token;
+            const httpBase = getAudioRelayBase();
+            const wsBase = httpBase.startsWith("https://")
+                ? "wss://" + httpBase.slice(8)
+                : httpBase.startsWith("http://")
+                  ? "ws://" + httpBase.slice(7)
+                  : (window.location.protocol === "https:" ? "wss://" : "ws://") +
+                    window.location.host +
+                    httpBase;
+            const room = encodeURIComponent(getRoomId());
+            let url = `${wsBase}/rooms/${room}/listen-ws`;
+            if (token) {
+                url += `?token=${encodeURIComponent(token)}`;
+            }
+            return url;
+        }
+
+        function getTalkPublishWsUrl() {
+            const token = getIceConfigFromUi().token;
+            const httpBase = getAudioRelayBase();
+            const wsBase = httpBase.startsWith("https://")
+                ? "wss://" + httpBase.slice(8)
+                : httpBase.startsWith("http://")
+                  ? "ws://" + httpBase.slice(7)
+                  : (window.location.protocol === "https:" ? "wss://" : "ws://") +
+                    window.location.host +
+                    httpBase;
+            const room = encodeURIComponent(getRoomId());
+            let url = `${wsBase}/rooms/${room}/talk-publish-ws`;
+            if (token) {
+                url += `?token=${encodeURIComponent(token)}`;
+            }
+            return url;
+        }
+
+        function stopPcMicHttpRelay(resetStatus = true) {
+            pcMicRelayGeneration += 1;
+            if (pcMicWs) {
+                try {
+                    pcMicWs.onopen = null;
+                    pcMicWs.onmessage = null;
+                    pcMicWs.onerror = null;
+                    pcMicWs.onclose = null;
+                    pcMicWs.close();
+                } catch (_) {}
+                pcMicWs = null;
+            }
+            if (pcMicSource) {
+                try {
+                    pcMicSource.disconnect();
+                } catch (_) {}
+                pcMicSource = null;
+            }
+            if (pcMicWorklet) {
+                try {
+                    pcMicWorklet.disconnect();
+                } catch (_) {}
+                pcMicWorklet = null;
+            }
+            if (pcMicStream) {
+                pcMicStream.getTracks().forEach((t) => t.stop());
+                pcMicStream = null;
+            }
+            if (pcMicCtx) {
+                pcMicCtx.close().catch(() => {});
+                pcMicCtx = null;
+            }
+            if (resetStatus) {
+                setMicStatus("idle", "Микрофон ПК → Pi (HTTP relay)");
+            }
+        }
+
+        async function ensurePcMicWorklet(ctx) {
+            if (pcMicWorklet) {
+                return pcMicWorklet;
+            }
+            const blob = new Blob([PC_MIC_WORKLET_SRC], { type: "application/javascript" });
+            const url = URL.createObjectURL(blob);
+            try {
+                await ctx.audioWorklet.addModule(url);
+            } finally {
+                URL.revokeObjectURL(url);
+            }
+            pcMicWorklet = new AudioWorkletNode(ctx, "pc-mic-capture", {
+                numberOfInputs: 1,
+                numberOfOutputs: 0,
+                channelCount: 1,
+            });
+            return pcMicWorklet;
+        }
+
+        async function startPcMicHttpRelay() {
+            if (!USE_PC_MIC_HTTP_RELAY) {
+                setMicStatus("idle", "Микрофон выкл. (?mic=0)");
+                return;
+            }
+            stopPcMicHttpRelay(false);
+            pcMicRelayGeneration += 1;
+            const gen = pcMicRelayGeneration;
+            const wsUrl = getTalkPublishWsUrl();
+            setMicStatus("pending", "Микрофон → Pi…");
+            try {
+                if (!navigator.mediaDevices?.getUserMedia) {
+                    throw new Error("getUserMedia недоступен (нужен HTTPS или localhost)");
+                }
+                pcMicStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true,
+                        channelCount: 1,
+                        sampleRate: PI_AUDIO_SAMPLE_RATE,
+                    },
+                    video: false,
+                });
+                pcMicCtx = new AudioContext({
+                    sampleRate: PI_AUDIO_SAMPLE_RATE,
+                    latencyHint: "interactive",
+                });
+                await ensurePcMicWorklet(pcMicCtx);
+                if (pcMicCtx.state === "suspended") {
+                    await pcMicCtx.resume();
+                }
+                pcMicSource = pcMicCtx.createMediaStreamSource(pcMicStream);
+                pcMicSource.connect(pcMicWorklet);
+            } catch (e) {
+                setMicStatus("denied", e && e.message ? e.message : String(e));
+                log("PC mic relay: " + (e && e.message ? e.message : String(e)), "error");
+                return;
+            }
+            const ws = new WebSocket(wsUrl);
+            ws.binaryType = "arraybuffer";
+            pcMicWs = ws;
+            let sent = false;
+            ws.onopen = () => {
+                if (gen !== pcMicRelayGeneration) {
+                    return;
+                }
+                log("PC mic WS open (→ Pi speaker)", "info");
+            };
+            ws.onerror = () => {
+                if (gen !== pcMicRelayGeneration) {
+                    return;
+                }
+                setMicStatus("waiting", "WS ошибка — переподключение…");
+            };
+            ws.onclose = () => {
+                if (gen !== pcMicRelayGeneration) {
+                    return;
+                }
+                setMicStatus("waiting", "WS закрыт — переподключение…");
+                setTimeout(() => {
+                    if (gen === pcMicRelayGeneration) {
+                        void startPcMicHttpRelay();
+                    }
+                }, 1500);
+            };
+            pcMicWorklet.port.onmessage = (ev) => {
+                if (gen !== pcMicRelayGeneration || !pcMicWs || pcMicWs.readyState !== WebSocket.OPEN) {
+                    return;
+                }
+                try {
+                    pcMicWs.send(ev.data);
+                    if (!sent) {
+                        sent = true;
+                        setMicStatus("ok", "Микрофон ПК → Pi (HTTP relay)");
+                        log("PC mic PCM stream sending", "success");
+                    }
+                } catch (_) {}
+            };
+        }
+
+        function stopPiAudioHttpRelay(resetStatus = true) {
+            piAudioRelayGeneration += 1;
+            if (piAudioWs) {
+                try {
+                    piAudioWs.onopen = null;
+                    piAudioWs.onmessage = null;
+                    piAudioWs.onerror = null;
+                    piAudioWs.onclose = null;
+                    piAudioWs.close();
+                } catch (_) {}
+                piAudioWs = null;
+            }
+            if (piAudioWorklet) {
+                try {
+                    piAudioWorklet.port.postMessage("stop");
+                    piAudioWorklet.disconnect();
+                } catch (_) {}
+                piAudioWorklet = null;
+            }
+            if (piAudioCtx) {
+                piAudioCtx.close().catch(() => {});
+                piAudioCtx = null;
+            }
+            window.__piAudioWsParts = 0;
+            if (resetStatus) {
+                setPiAudioStatus("idle", "Звук Pi (C PCM tunnel)");
+            }
+        }
+
+        async function ensurePiAudioWorklet(ctx) {
+            if (piAudioWorklet) {
+                return piAudioWorklet;
+            }
+            const blob = new Blob([PI_PCM_WORKLET_SRC], { type: "application/javascript" });
+            const url = URL.createObjectURL(blob);
+            try {
+                await ctx.audioWorklet.addModule(url);
+            } finally {
+                URL.revokeObjectURL(url);
+            }
+            piAudioWorklet = new AudioWorkletNode(ctx, "pi-pcm-player", {
+                numberOfInputs: 0,
+                numberOfOutputs: 1,
+                outputChannelCount: [1],
+            });
+            piAudioWorklet.connect(ctx.destination);
+            return piAudioWorklet;
+        }
+
+        async function startPiAudioHttpRelay() {
+            if (!USE_PI_AUDIO_HTTP_RELAY) {
+                setPiAudioStatus("idle", "Звук выкл. (?audio=0)");
+                return;
+            }
+            stopPiAudioHttpRelay(false);
+            piAudioRelayGeneration += 1;
+            const gen = piAudioRelayGeneration;
+            const wsUrl = getPiAudioListenWsUrl();
+            setPiAudioStatus("pending", "C PCM WebSocket…");
+            let played = false;
+            try {
+                piAudioCtx = new AudioContext({ sampleRate: PI_AUDIO_SAMPLE_RATE, latencyHint: "interactive" });
+                await ensurePiAudioWorklet(piAudioCtx);
+                if (piAudioCtx.state === "suspended") {
+                    await piAudioCtx.resume();
+                }
+            } catch (e) {
+                log("Pi audio worklet: " + (e && e.message ? e.message : String(e)), "error");
+                setPiAudioStatus("waiting", "AudioWorklet недоступен");
+                return;
+            }
+            const ws = new WebSocket(wsUrl);
+            ws.binaryType = "arraybuffer";
+            piAudioWs = ws;
+            ws.onopen = () => {
+                if (gen !== piAudioRelayGeneration) {
+                    return;
+                }
+                log("Pi audio WS open (C PCM tunnel)", "info");
+            };
+            ws.onmessage = (ev) => {
+                if (gen !== piAudioRelayGeneration || !piAudioWorklet) {
+                    return;
+                }
+                window.__piAudioWsParts = (window.__piAudioWsParts || 0) + 1;
+                piAudioWorklet.port.postMessage(ev.data, [ev.data]);
+                if (!played) {
+                    played = true;
+                    setPiAudioStatus("ok", "Звук Pi (C PCM, ~20 ms)");
+                    log("Pi audio PCM stream playing", "success");
+                }
+            };
+            ws.onerror = () => {
+                if (gen !== piAudioRelayGeneration) {
+                    return;
+                }
+                setPiAudioStatus("waiting", "WS ошибка — переподключение…");
+                log("Pi audio WebSocket error — retry", "warn");
+            };
+            ws.onclose = () => {
+                if (gen !== piAudioRelayGeneration) {
+                    return;
+                }
+                setPiAudioStatus("waiting", "WS закрыт — переподключение…");
+                setTimeout(() => {
+                    if (gen === piAudioRelayGeneration) {
+                        void startPiAudioHttpRelay();
+                    }
+                }, 1500);
+            };
+        }
+
         function setPiAudioStatus(state, title) {
             const el = document.getElementById("piAudioStatus");
             if (!el) {
@@ -1649,22 +2064,6 @@
             }
         }
 
-        async function playRemoteAudio() {
-            const audio = document.getElementById("remoteAudio");
-            if (!audio || !audio.srcObject) {
-                return;
-            }
-            try {
-                audio.muted = false;
-                await audio.play();
-                setPiAudioStatus("ok", "Звук с микрофона Pi");
-                log("Pi audio: play() OK", "success");
-            } catch (e) {
-                setPiAudioStatus("waiting", "Кликните Connect ещё раз или проверьте громкость");
-                log("Pi audio play() failed: " + (e && e.message ? e.message : String(e)), "error");
-            }
-        }
-
         function setStatus(text, cls) {
             const el = document.getElementById("status");
             el.textContent = text;
@@ -1747,12 +2146,22 @@
             log("Starting WebRTC connection...");
             setStatus("Connecting...", "connecting");
             document.getElementById("btnConnect").disabled = true;
+            if (USE_PI_AUDIO_HTTP_RELAY) {
+                void startPiAudioHttpRelay();
+            }
+            if (USE_PC_MIC_HTTP_RELAY) {
+                void startPcMicHttpRelay();
+            }
             document.getElementById("btnDisconnect").disabled = false;
 
             teardownSignalingListeners();
             resetPiCalleeIceStats();
             eventsSince = 0;
             if (dataChannel) {
+                try {
+                    sendDc(romeoDriveJson("stop"), { quiet: true });
+                    sendDc(romeoTurretStopJson(), { quiet: true });
+                } catch (_) {}
                 try {
                     dataChannel.close();
                 } catch (_) {}
@@ -1886,27 +2295,23 @@
 
             pc.ondatachannel = (ev) => {
                 log(`Remote DataChannel (от Pi): label="${ev.channel.label}"`, "success");
-                try {
-                    if (dataChannel && dataChannel !== ev.channel) {
-                        dataChannel.close();
-                    }
-                } catch (_) {}
                 wireControlChannel(ev.channel);
             };
 
             pc.ontrack = async (event) => {
                 const track = event.track;
+                log("Received remote track: " + track.kind + ", id=" + track.id, "success");
+
                 if (track.kind === "audio") {
-                    track.stop();
+                    log("WebRTC audio track ignored (звук через HTTP relay)", "info");
                     return;
                 }
-                log("Received remote track: " + track.kind + ", id=" + track.id, "success");
-                track.enabled = true;
-                track.onmute = () => log("Remote track muted: " + track.kind, "warn");
-                track.onunmute = () => log("Remote track unmuted: " + track.kind, "success");
-                track.onended = () => log("Remote track ended: " + track.kind, "error");
 
                 if (track.kind === "video") {
+                    track.onmute = () => log("Remote track muted: " + track.kind, "warn");
+                    track.onunmute = () => log("Remote track unmuted: " + track.kind, "success");
+                    track.onended = () => log("Remote track ended: " + track.kind, "error");
+                    track.enabled = true;
                     log(
                         "Video codec hint: check Pi sends H.264 baseline/profile browsers can decode (not HEVC-only)",
                         "info",
@@ -1932,9 +2337,8 @@
                 }
             };
 
-            log("SDP: только видео + управление (аудио-канал отключён)", "info");
+            log("WebRTC: video + control; audio = HTTP relay (Pi↔browser)", "info");
 
-            // Приём только видео; в SDP сначала H.264 (иначе Pi часто договаривается о VP8 и шлёт H264 — чёрный экран)
             const videoTransceiver = pc.addTransceiver("video", { direction: "recvonly" });
             preferH264Receive(videoTransceiver);
 
@@ -2058,6 +2462,12 @@
             teardownSignalingListeners();
             lowLatencyHintLogged = false;
 
+            // Без stop Romeo продолжает MF/TANK после закрытия Data Channel.
+            try {
+                sendDc(romeoDriveJson("stop"), { quiet: true });
+                sendDc(romeoTurretStopJson(), { quiet: true });
+            } catch (_) {}
+
             if (dataChannel) {
                 dataChannel.close();
                 dataChannel = null;
@@ -2067,6 +2477,8 @@
                 pc = null;
             }
             audioTransceiver = null;
+            stopPiAudioHttpRelay();
+            stopPcMicHttpRelay();
             connectInProgress = false;
 
             document.getElementById("remoteVideo").srcObject = null;
@@ -2154,7 +2566,7 @@
             window.__webrtcMarkReady();
         }
         log(`VPS room: ${getRoomPath()} · signaling ${signalApiBase}`, "info");
-        log("Operator build: 2026-06-12 (lowlat-v1)", "success");
+        log("Operator build: 2026-06-14 (duplex-http-audio)", "success");
         if (FORCE_TCP_TURN) {
             log("ICE: TURN через TCP 3478 (udpTurn=1 — вернуть UDP relay)", "info");
         }

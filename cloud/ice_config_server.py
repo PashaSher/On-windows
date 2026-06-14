@@ -29,8 +29,10 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
+from typing import Iterator
 
 from webrtc_signal_store import STORE, normalize_room_id
+from audio_relay_store import AUDIO_RELAY
 
 DEFAULT_STUN = [
     {"urls": "stun:stun.l.google.com:19302"},
@@ -74,6 +76,7 @@ def _operator_bootstrap_payload() -> dict:
         "iceConfigUrl": "/api/ice",
         "iceConfigToken": token,
         "signalApiBase": "/api/signal",
+        "audioRelayBase": "/api/audio-relay",
         "signaling": "vps",
     }
 
@@ -97,6 +100,24 @@ def _resolve_operator_file(url_path: str) -> Path | None:
     if candidate.is_file():
         return candidate
     return None
+
+
+def _operator_deploy_root() -> Path:
+    raw = os.environ.get("OPERATOR_DEPLOY_ROOT", "/var/lib/ice-config-operator").strip()
+    root = Path(raw).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _resolve_operator_deploy_file(rel_path: str) -> Path | None:
+    root = _operator_deploy_root()
+    rel = unquote(rel_path).lstrip("/")
+    if not rel or ".." in rel.split("/"):
+        return None
+    candidate = (root / rel).resolve()
+    if not str(candidate).startswith(str(root)):
+        return None
+    return candidate
 
 
 def _auth_ok(handler: BaseHTTPRequestHandler) -> bool:
@@ -145,6 +166,153 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Methods", "GET, PUT, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Clear")
         self.end_headers()
+
+    def _parse_audio_relay(self, path: str) -> tuple[str, list[str]] | None:
+        parts = [p for p in path.split("/") if p]
+        if len(parts) < 4 or parts[0] != "api" or parts[1] != "audio-relay" or parts[2] != "rooms":
+            return None
+        return parts[3], parts[4:]
+
+    def _iter_request_body_chunks(self) -> Iterator[bytes]:
+        te = (self.headers.get("Transfer-Encoding") or "").lower()
+        if te == "chunked":
+            while True:
+                line = self.rfile.readline()
+                if not line:
+                    break
+                size_hex = line.strip().split(b";", 1)[0]
+                if not size_hex:
+                    break
+                size = int(size_hex, 16)
+                if size == 0:
+                    self.rfile.readline()
+                    break
+                data = self.rfile.read(size)
+                if len(data) < size:
+                    break
+                self.rfile.readline()
+                if data:
+                    yield data
+            return
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        if length <= 0:
+            return
+        remaining = length
+        while remaining > 0:
+            chunk = self.rfile.read(min(remaining, 4096))
+            if not chunk:
+                break
+            remaining -= len(chunk)
+            yield chunk
+
+    def _write_chunked(self, data: bytes) -> None:
+        if not data:
+            return
+        self.wfile.write(f"{len(data):x}\r\n".encode("ascii"))
+        self.wfile.write(data)
+        self.wfile.write(b"\r\n")
+        self.wfile.flush()
+
+    def _read_body_bytes(self) -> bytes:
+        te = (self.headers.get("Transfer-Encoding") or "").lower()
+        if te == "chunked":
+            return b"".join(self._iter_request_body_chunks())
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        if length <= 0:
+            return b""
+        return self.rfile.read(length)
+
+    def _parse_operator_static(self, path: str) -> str | None:
+        parts = [p for p in path.split("/") if p]
+        if len(parts) < 3 or parts[0] != "api" or parts[1] != "operator-static":
+            return None
+        return "/".join(parts[2:])
+
+    def _handle_operator_static_put(self, rel_path: str) -> bool:
+        if not _auth_ok(self):
+            self._json_response(401, {"error": "unauthorized"})
+            return True
+        target = _resolve_operator_deploy_file(rel_path)
+        if target is None:
+            self._json_response(400, {"error": "invalid path"})
+            return True
+        body = self._read_body_bytes()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(body)
+        self._json_response(200, {"ok": True, "path": rel_path, "bytes": len(body)})
+        return True
+
+    def _handle_audio_listen(self, room: str) -> bool:
+        if not _auth_ok(self):
+            self._json_response(401, {"error": "unauthorized"})
+            return True
+        q = AUDIO_RELAY.register_listener(room)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Transfer-Encoding", "chunked")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        try:
+            for chunk in AUDIO_RELAY.iter_listener(room, q):
+                self._write_chunked(chunk)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            AUDIO_RELAY.unregister_listener(room, q)
+            try:
+                self._write_chunked(b"")
+                self.wfile.write(b"0\r\n\r\n")
+                self.wfile.flush()
+            except OSError:
+                pass
+        return True
+
+    def _handle_audio_publish(self, room: str) -> bool:
+        if not _auth_ok(self):
+            self._json_response(401, {"error": "unauthorized"})
+            return True
+        ct = (self.headers.get("Content-Type") or "").lower()
+        if "json" in ct:
+            self._json_response(400, {"error": "expected application/octet-stream"})
+            return True
+        AUDIO_RELAY.mark_publisher(room, True)
+        total = 0
+        try:
+            for chunk in self._iter_request_body_chunks():
+                total += len(chunk)
+                AUDIO_RELAY.publish(room, chunk)
+        finally:
+            AUDIO_RELAY.mark_publisher(room, False)
+        self._json_response(200, {"ok": True, "bytes": total})
+        return True
+
+    def _handle_audio_status(self, room: str) -> bool:
+        self._json_response(
+            200,
+            {
+                "room": room,
+                "publisherActive": AUDIO_RELAY.publisher_active(room),
+            },
+        )
+        return True
+
+    def _dispatch_audio_relay(self, method: str) -> bool:
+        parsed = self._parse_audio_relay(urlparse(self.path).path)
+        if parsed is None:
+            return False
+        room, tail = parsed
+        room = normalize_room_id(room)
+        if method == "GET" and tail == ["listen"]:
+            return self._handle_audio_listen(room)
+        if method == "GET" and tail == ["status"]:
+            return self._handle_audio_status(room)
+        if method == "POST" and tail == ["publish"]:
+            return self._handle_audio_publish(room)
+        if method == "OPTIONS":
+            return False
+        self._json_response(404, {"error": "not found"})
+        return True
 
     def _parse_signal(self, path: str) -> tuple[str, list[str]] | None:
         parts = [p for p in path.split("/") if p]
@@ -252,6 +420,12 @@ class Handler(BaseHTTPRequestHandler):
         return False
 
     def _serve_operator_static(self, url_path: str) -> bool:
+        deploy = _resolve_operator_deploy_file(unquote(url_path).lstrip("/") or "webrtc-client.html")
+        if deploy is not None and deploy.is_file():
+            body = deploy.read_bytes()
+            ctype = mimetypes.guess_type(str(deploy))[0] or "application/octet-stream"
+            self._send(200, body, ctype)
+            return True
         file_path = _resolve_operator_file(url_path)
         if file_path is None:
             return False
@@ -262,6 +436,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
+        if self._dispatch_audio_relay("GET"):
+            return
         if self._dispatch_signal("GET"):
             return
         if path == "/api/operator-bootstrap":
@@ -282,11 +458,18 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, b'{"error":"not found"}', "application/json")
 
     def do_PUT(self) -> None:  # noqa: N802
+        path = urlparse(self.path).path
+        rel = self._parse_operator_static(path)
+        if rel is not None:
+            self._handle_operator_static_put(rel)
+            return
         if self._dispatch_signal("PUT"):
             return
         self._send(404, b'{"error":"not found"}', "application/json")
 
     def do_POST(self) -> None:  # noqa: N802
+        if self._dispatch_audio_relay("POST"):
+            return
         if self._dispatch_signal("POST"):
             return
         self._send(404, b'{"error":"not found"}', "application/json")
@@ -316,6 +499,7 @@ def main() -> None:
     if web_root:
         print(f"Operator static: {web_root} (e.g. /webrtc-client.html)", file=sys.stderr, flush=True)
     print("Signaling: GET/PUT/POST /api/signal/rooms/<id>/...", file=sys.stderr, flush=True)
+    print("Audio relay: GET .../listen, POST .../publish", file=sys.stderr, flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

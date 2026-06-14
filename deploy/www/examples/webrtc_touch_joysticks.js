@@ -49,13 +49,23 @@ export function mountVirtualJoystick(root, opts) {
         return nx < 0 ? "left" : "right";
     }
 
+    let emitTimer = null;
     function emit(dir) {
         const d = dir || null;
         if (d === lastDir) {
             return;
         }
-        lastDir = d;
-        onDir(d);
+        if (emitTimer) {
+            clearTimeout(emitTimer);
+        }
+        emitTimer = setTimeout(() => {
+            emitTimer = null;
+            if (d === lastDir) {
+                return;
+            }
+            lastDir = d;
+            onDir(d);
+        }, 55);
     }
 
     function moveKnob(clientX, clientY) {

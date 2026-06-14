@@ -21,6 +21,19 @@ server {
         add_header Access-Control-Allow-Origin * always;
     }
 
+    location /api/audio-relay/ {
+        proxy_pass http://127.0.0.1:8788/api/audio-relay/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        add_header Access-Control-Allow-Origin * always;
+        add_header Access-Control-Allow-Methods "GET, POST, OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Authorization, Content-Type" always;
+    }
+
     location /api/signal/ {
         proxy_pass http://127.0.0.1:8788/api/signal/;
         proxy_http_version 1.1;
@@ -73,6 +86,19 @@ server {
         proxy_set_header Host $host;
         add_header Cache-Control "no-store" always;
         add_header Access-Control-Allow-Origin * always;
+    }
+
+    location /api/audio-relay/ {
+        proxy_pass http://127.0.0.1:8788/api/audio-relay/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        add_header Access-Control-Allow-Origin * always;
+        add_header Access-Control-Allow-Methods "GET, POST, OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Authorization, Content-Type" always;
     }
 
     location /api/signal/ {
