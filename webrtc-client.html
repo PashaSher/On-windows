@@ -722,6 +722,8 @@
         /** Один AudioContext на оба направления — resume() успевает в жесте Connect. */
         let duplexAudioCtx = null;
         const PI_AUDIO_SAMPLE_RATE = 16000;
+        /** Усиление звука Pi → браузер (1.0 = без изменений). */
+        const PI_AUDIO_PLAYBACK_GAIN = 4.0;
         const PI_PCM_PREFILL_SAMPLES = Math.ceil(PI_AUDIO_SAMPLE_RATE * 0.08);
         const PI_PCM_MAX_SAMPLES = Math.ceil(PI_AUDIO_SAMPLE_RATE * 0.35);
         const PC_MIC_WORKLET_SRC = `
@@ -1906,7 +1908,7 @@ registerProcessor("pc-mic-capture", PcMicCapture);
         function ensurePiAudioOutput(ctx) {
             if (!piAudioGainNode || piAudioGainNode.context !== ctx) {
                 piAudioGainNode = ctx.createGain();
-                piAudioGainNode.gain.value = 1.0;
+                piAudioGainNode.gain.value = PI_AUDIO_PLAYBACK_GAIN;
                 piAudioGainNode.connect(ctx.destination);
             }
             return piAudioGainNode;
@@ -3013,7 +3015,7 @@ registerProcessor("pc-mic-capture", PcMicCapture);
         }
 
         /** Макс. скорость башни с телефона (град/с); Pi масштабирует через ROMEO_TURRET_VEL_SCALE. */
-        const TURRET_JOY_MAX_VEL = 10;
+        const TURRET_JOY_MAX_VEL = 20;
 
         function sendTurretDir(dir) {
             if (dir) {

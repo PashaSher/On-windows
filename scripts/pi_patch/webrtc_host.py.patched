@@ -318,6 +318,24 @@ class WebRTCHost:
     def _set_telemetry_active(self, active: bool) -> None:
         self._telemetry_active = active
 
+    async def _power_idle_side_effects(self) -> None:
+        loop = asyncio.get_running_loop()
+        try:
+            from rpi_tools.pi_power_save import set_publishers_active
+
+            await loop.run_in_executor(None, lambda: set_publishers_active(False))
+        except ImportError:
+            pass
+
+    async def _power_active_side_effects(self) -> None:
+        loop = asyncio.get_running_loop()
+        try:
+            from rpi_tools.pi_power_save import set_publishers_active
+
+            await loop.run_in_executor(None, lambda: set_publishers_active(True))
+        except ImportError:
+            pass
+
     async def _finalize_session_for_reconnect(self) -> None:
         """VPS/Firebase: очистка SDP — Pi снова ждёт offer (ручной Connect в браузере)."""
         self._set_telemetry_active(False)
@@ -335,6 +353,7 @@ class WebRTCHost:
                 "(hostSessionId=%s)",
                 self._host_session_id,
             )
+            await self._power_idle_side_effects()
         else:
             log.info(
                 "WebRTC: готов к новому Connect (hostSessionId=%s, ждём offer на VPS)",
@@ -350,6 +369,7 @@ class WebRTCHost:
                 await wake()
         if self._power_save:
             log.info("WebRTC: ping (offer) с VPS — включаем камеру")
+        await self._power_active_side_effects()
         # После Disconnect DELETE room сбрасывает host — один раз шлём телеметрию на Connect.
         await self._push_telemetry_once(trigger="connect")
 
@@ -425,6 +445,7 @@ class WebRTCHost:
             enter_idle = getattr(self._signaling, "enter_power_idle", None)
             if callable(enter_idle):
                 await enter_idle(0)
+            await self._power_idle_side_effects()
             log.info(
                 "WebRTC: старт в режиме экономии — камера выкл, ждём Connect (offer) на VPS"
             )
