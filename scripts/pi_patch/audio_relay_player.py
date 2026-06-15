@@ -25,6 +25,9 @@ def _env(name: str, default: str = "") -> str:
 
 
 TALK_IDLE_SEC = float(_env("AUDIO_TALK_IDLE_SEC", "0.45") or "0.45")
+# Переподключение talk-listen: после рестарта VPS старый TCP может «висеть» без PCM.
+LISTEN_MAX_SEC = float(_env("AUDIO_TALK_LISTEN_MAX_SEC", "1800") or "1800")
+STALE_IDLE_SEC = float(_env("AUDIO_TALK_STALE_SEC", "90") or "90")
 
 
 RELAY_SERVICE = _env("PI_AUDIO_RELAY_SERVICE", "pi-audio-relay")
@@ -194,8 +197,14 @@ def run_once(listen_url: str, token: str, device: str) -> None:
             relay_paused = False
         log.info("talk playback ended: %d bytes (session)", total)
 
+    conn_started = time.monotonic()
+    last_pcm_at = conn_started
     try:
         while True:
+            now = time.monotonic()
+            if LISTEN_MAX_SEC > 0 and now - conn_started >= LISTEN_MAX_SEC:
+                log.info("talk-listen max age %.0fs — reconnect", LISTEN_MAX_SEC)
+                break
             chunk = _read_chunk()
             if chunk is None:
                 break
@@ -204,7 +213,14 @@ def run_once(listen_url: str, token: str, device: str) -> None:
                     log.info("talk idle %.2fs — resume Pi mic capture", TALK_IDLE_SEC)
                     _finish_aplay()
                     total = 0
+                elif STALE_IDLE_SEC > 0 and now - last_pcm_at >= STALE_IDLE_SEC:
+                    log.warning(
+                        "talk-listen stale %.0fs without PCM — reconnect",
+                        STALE_IDLE_SEC,
+                    )
+                    break
                 continue
+            last_pcm_at = time.monotonic()
             if proc is None:
                 total = 0
                 _relay_capture_pause()

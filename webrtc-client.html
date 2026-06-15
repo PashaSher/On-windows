@@ -54,67 +54,27 @@
         }
         .telemetry-item.telemetry--low { color: #ef9a9a; }
         .telemetry-item.telemetry--offline { color: #ffab91; }
-        .mic-talk-row {
-            max-width: 520px;
-            margin: 12px auto 0;
-            text-align: center;
-        }
-        .btn-mic-ptt {
-            display: inline-flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 4px;
-            width: min(44vw, 148px);
-            height: min(44vw, 148px);
-            max-width: 148px;
-            max-height: 148px;
-            border-radius: 50%;
-            border: 3px solid #607d8b;
-            background: linear-gradient(160deg, #546e7a 0%, #263238 100%);
-            color: #eceff1;
-            cursor: pointer;
-            touch-action: manipulation;
-            user-select: none;
-            -webkit-user-select: none;
-            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
-            transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
-        }
-        .btn-mic-ptt:active { transform: scale(0.96); }
-        .btn-mic-ptt__icon {
-            font-size: 2rem;
-            line-height: 1;
-        }
-        .btn-mic-ptt__label {
-            font-size: 0.72rem;
-            font-weight: 700;
-            letter-spacing: 0.02em;
-            text-transform: uppercase;
-            line-height: 1.15;
-            max-width: 9em;
-        }
-        .btn-mic-ptt.mic--ok {
-            border-color: #ff5252;
-            background: linear-gradient(160deg, #ff7043 0%, #c62828 100%);
-            box-shadow: 0 0 0 4px rgba(255, 82, 82, 0.35), 0 8px 22px rgba(198, 40, 40, 0.45);
+        .btn-mic-round {
+            background: #37474f;
             color: #fff;
+            font-size: 0.85rem;
         }
-        .btn-mic-ptt.mic--pending {
-            border-color: #ffb74d;
-            background: linear-gradient(160deg, #ffb74d 0%, #f57c00 100%);
-            color: #1a1a1a;
+        .btn-mic-round:active { transform: scale(0.96); }
+        .btn-mic-round.mic--ok {
+            background: #c62828;
+            box-shadow: 0 0 0 3px rgba(255, 82, 82, 0.4);
+        }
+        .btn-mic-round.mic--pending {
+            background: #f57c00;
             animation: mic-pulse 1s ease-in-out infinite;
         }
-        .btn-mic-ptt.mic--denied {
-            border-color: #8d6e63;
-            background: linear-gradient(160deg, #8d6e63 0%, #4e342e 100%);
+        .btn-mic-round.mic--denied {
+            background: #5d4037;
             opacity: 0.85;
         }
-        .btn-mic-ptt.mic--https {
-            border-color: #42a5f5;
-            background: linear-gradient(160deg, #29b6f6 0%, #1565c0 100%);
-            color: #fff;
-            box-shadow: 0 0 0 4px rgba(66, 165, 245, 0.28), 0 8px 22px rgba(21, 101, 192, 0.35);
+        .btn-mic-round.mic--https {
+            background: #1565c0;
+            box-shadow: 0 0 0 3px rgba(66, 165, 245, 0.35);
         }
         .mic-https-banner {
             display: none;
@@ -136,13 +96,7 @@
         }
         @keyframes mic-pulse {
             0%, 100% { box-shadow: 0 0 0 0 rgba(255, 183, 77, 0.45); }
-            50% { box-shadow: 0 0 0 8px rgba(255, 183, 77, 0.15); }
-        }
-        .mic-talk-hint {
-            margin: 8px 8px 0;
-            font-size: 0.72rem;
-            line-height: 1.35;
-            color: #90a4ae;
+            50% { box-shadow: 0 0 0 6px rgba(255, 183, 77, 0.12); }
         }
         .telemetry-age {
             font-size: 0.68rem;
@@ -242,7 +196,7 @@
             .control-dock .romeo-msg-row,
             .control-dock .btn-round,
             .control-dock .btn-msg,
-            .control-dock .btn-mic-ptt,
+            .control-dock .btn-mic-round,
             .control-dock input {
                 pointer-events: auto;
             }
@@ -463,6 +417,13 @@
                     </div>
                     <div class="joystick-mid">
                         <button type="button" class="btn-round btn-home-round" id="btnHome" title="Home">H</button>
+                        <button
+                            type="button"
+                            class="btn-round btn-mic-round"
+                            id="btnMicTalk"
+                            aria-pressed="false"
+                            title="Держите — говорить в динамик Pi. Отпустите — снова услышите Pi."
+                        >M</button>
                     </div>
                     <div class="joystick-wrap">
                         <span class="joystick-label">Камера</span>
@@ -473,19 +434,6 @@
                     Микрофон браузера блокируется по <strong>HTTP</strong>.
                     <a id="micHttpsLink" href="https://116.203.148.254/cam">Откройте HTTPS /cam</a>
                     — там Chrome разрешит микрофон.
-                </div>
-                <div class="mic-talk-row">
-                    <button
-                        type="button"
-                        id="btnMicTalk"
-                        class="btn-mic-ptt"
-                        aria-pressed="false"
-                        title="Держите — говорить в динамик Pi. Отпустите — снова услышите Pi."
-                    >
-                        <span class="btn-mic-ptt__icon" id="btnMicTalkIcon" aria-hidden="true">🎤</span>
-                        <span class="btn-mic-ptt__label" id="btnMicTalkLabel">Говорить в Pi</span>
-                    </button>
-                    <p class="mic-talk-hint">Держите кнопку — говорите в Pi. Отпустите — снова услышите звук с Pi.</p>
                 </div>
                 <div class="romeo-msg-row">
                     <input type="text" id="romeoMsgInput" placeholder="" maxlength="120" autocomplete="off">
@@ -1758,52 +1706,25 @@ registerProcessor("pc-mic-capture", PcMicCapture);
 
         function setMicStatus(state, title) {
             const btn = document.getElementById("btnMicTalk");
-            const icon = document.getElementById("btnMicTalkIcon");
-            const label = document.getElementById("btnMicTalkLabel");
             if (!btn) {
                 return;
             }
             btn.classList.remove("mic--ok", "mic--pending", "mic--denied", "mic--https");
             btn.setAttribute("aria-pressed", state === "ok" ? "true" : "false");
             if (state === "ok") {
-                if (icon) {
-                    icon.textContent = "⏹";
-                }
-                if (label) {
-                    label.textContent = "Говорите";
-                }
+                btn.textContent = "M";
                 btn.classList.add("mic--ok");
             } else if (state === "denied" || state === "off") {
-                if (icon) {
-                    icon.textContent = "🎤";
-                }
-                if (label) {
-                    label.textContent = "Ошибка доступа";
-                }
+                btn.textContent = "M";
                 btn.classList.add("mic--denied");
             } else if (state === "https") {
-                if (icon) {
-                    icon.textContent = "🔒";
-                }
-                if (label) {
-                    label.textContent = "Открыть HTTPS";
-                }
+                btn.textContent = "M";
                 btn.classList.add("mic--https");
             } else if (state === "pending") {
-                if (icon) {
-                    icon.textContent = "🎤";
-                }
-                if (label) {
-                    label.textContent = "Подключение…";
-                }
+                btn.textContent = "M";
                 btn.classList.add("mic--pending");
             } else {
-                if (icon) {
-                    icon.textContent = "🎤";
-                }
-                if (label) {
-                    label.textContent = "Держите";
-                }
+                btn.textContent = "M";
             }
             if (title) {
                 btn.title = title;
@@ -3015,11 +2936,11 @@ registerProcessor("pc-mic-capture", PcMicCapture);
         }
 
         /** Макс. скорость башни с телефона (град/с); Pi масштабирует через ROMEO_TURRET_VEL_SCALE. */
-        const TURRET_JOY_MAX_VEL = 20;
+        const TURRET_JOY_MAX_VEL = 40;
 
         function sendTurretDir(dir) {
             if (dir) {
-                sendDc(romeoTurretSmoothJson(dir, 8), { quiet: true });
+                sendDc(romeoTurretSmoothJson(dir, 16), { quiet: true });
             } else {
                 sendDc(romeoTurretStopJson(), { quiet: true });
             }
@@ -3103,7 +3024,7 @@ registerProcessor("pc-mic-capture", PcMicCapture);
             window.__webrtcMarkReady();
         }
         log(`VPS room: ${getRoomPath()} · signaling ${signalApiBase}`, "info");
-        log("Operator build: 2026-06-14 (duplex-audio-talk-v20)", "success");
+        log("Operator build: 2026-06-15 (mic-btn-compact-turret-2x)", "success");
         if (FORCE_TCP_TURN) {
             log("ICE: TURN через TCP 3478 (udpTurn=1 — вернуть UDP relay)", "info");
         }
